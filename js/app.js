@@ -1,0 +1,1143 @@
+/* =====================================================================
+ * app.js — the screens. Connects typing, scanning, lists, reports,
+ * people balances, settings and Google Drive sync together.
+ * ===================================================================== */
+(function () {
+  'use strict';
+
+  const APP_VERSION = '1.5.0';
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
+  const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const pad = (n) => String(n).padStart(2, '0');
+  const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const todayIso = () => iso(new Date());
+  const monthStart = (y, m) => iso(new Date(y, m, 1));
+  const monthEnd = (y, m) => iso(new Date(y, m + 1, 0));
+  const monthName = (y, m, short) => new Date(y, m, 1).toLocaleString('en-IN', { month: short ? 'short' : 'long', year: 'numeric' });
+  const niceDate = (s) => {
+    const d = new Date(s + 'T00:00:00');
+    const t = todayIso();
+    if (s === t) return 'Today';
+    if (s === iso(new Date(Date.now() - 864e5))) return 'Yesterday';
+    return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+  };
+  const INFLOW = new Set(['income', 'borrowed', 'got_back']);
+  const IS_IOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+  const shortDate = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  const curYm = () => todayIso().slice(0, 7);
+
+  /* ---------- Toast (small message at the bottom) ---------------------- */
+  let toastTimer;
+  function toast(msg, actionLabel, action) {
+    const t = $('#toast');
+    t.innerHTML = '<span>' + esc(msg) + '</span>' + (actionLabel ? '<button>' + esc(actionLabel) + '</button>' : '');
+    t.hidden = false;
+    if (actionLabel) $('button', t).onclick = () => { t.hidden = true; action(); };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, actionLabel ? 6000 : 3000);
+  }
+
+  function download(name, content, mime) {
+    const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
+    // iPhone: saving files works best through the Share sheet ("Save to Files", WhatsApp, Mail…)
+    if (IS_IOS && navigator.canShare) {
+      const file = new File([blob], name, { type: mime || blob.type });
+      if (navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: name }).catch(() => {}); return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  /* ---------- Theme ---------------------------------------------------- */
+  const THEME_KEY = 'expense-tracker.theme';
+  function applyTheme(v) {
+    if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme;
+  }
+  applyTheme(localStorage.getItem(THEME_KEY) || '');
+
+  /* ---------- Navigation (uses #hash so the phone's Back button works) - */
+  const VIEWS = ['home', 'history', 'people', 'reports', 'settings'];
+  let current = 'home';
+  function show(view) {
+    if (!VIEWS.includes(view)) view = 'home';
+    current = view;
+    VIEWS.forEach((v) => { $('#view-' + v).hidden = v !== view; });
+    $$('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.go === view));
+    $('#view-title').textContent = $('#view-' + view).dataset.title;
+    render();
+    window.scrollTo(0, 0);
+  }
+  function go(view) { if (location.hash !== '#' + view) location.hash = view === 'home' ? '' : view; else show(view); }
+  window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'home'));
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-go]');
+    if (b) go(b.dataset.go);
+    const c = e.target.closest('[data-close]');
+    if (c) c.closest('dialog').close();
+  });
+
+  /* ---------- Rows (one record in a list) ------------------------------ */
+  function describe(t) {
+    const who = esc(t.person);
+    switch (t.type) {
+      case 'lent': return { title: 'Gave ' + who, sub: t.note ? esc(t.note) : 'They owe you' };
+      case 'borrowed': return { title: 'Took from ' + who, sub: t.note ? esc(t.note) : 'You owe them' };
+      case 'got_back': return { title: who + ' paid back', sub: t.note ? esc(t.note) : 'Money returned to you' };
+      case 'paid_back': return { title: 'Paid back ' + who, sub: t.note ? esc(t.note) : 'You returned money' };
+      default: return { title: esc(t.note || t.category), sub: esc(t.category) + (t.type === 'expense' && t.person ? ' · 🎁 ' + who : '') };
+    }
+  }
+  function rowHTML(t, opts) {
+    const d = describe(t);
+    const sub = [d.sub, t.recurId ? '🔁 monthly' : '', t.mode ? esc(t.mode) : '', opts && opts.showDate ? niceDate(t.date) : ''].filter(Boolean).join(' · ');
+    const inflow = INFLOW.has(t.type);
+    return `<button class="row" data-id="${t.id}">
+      <span class="ico">${Parser.iconFor(t.type, t.category)}</span>
+      <span class="what"><b>${d.title}</b><span>${sub}</span></span>
+      <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(t.amount)}${t.type === 'saving' ? '<small>saved</small>' : ''}</span>
+    </button>`;
+  }
+  document.addEventListener('click', (e) => {
+    const r = e.target.closest('.row[data-id]');
+    if (r) {
+      const t = Store.get().txns.find((x) => x.id === r.dataset.id);
+      if (t) openSheet({ mode: 'edit', rec: t });
+    }
+  });
+
+  /* =====================================================================
+   * QUICK ADD — type a few words
+   * ===================================================================== */
+  const quick = $('#quick');
+  let parsed = [];
+
+  function ctx() {
+    const people = Store.people();
+    return { learned: Store.get().learned, owesMe: (n) => people.some((p) => p.key === n.toLowerCase() && p.balance > 0) };
+  }
+
+  function autoGrow() { quick.style.height = 'auto'; quick.style.height = Math.min(140, quick.scrollHeight) + 'px'; }
+
+  function renderPreview() {
+    const text = quick.value.trim();
+    parsed = text ? Parser.parseMany(text, ctx()) : [];
+    const good = parsed.filter((p) => p.ok);
+    $('#btn-add').disabled = !good.length;
+    $('#btn-add').textContent = good.length > 1 ? 'Add ' + good.length + ' entries' : 'Add';
+    $('#examples').hidden = !!text;
+    $('#preview').innerHTML = parsed.map((p, i) => {
+      if (!p.ok) return `<div class="pv err"><span class="ico">⚠️</span><span class="what"><b>${esc(p.raw)}</b><span>${esc(p.error)}</span></span></div>`;
+      const d = describe(p);
+      const typeLabel = Parser.TYPES[p.type].label;
+      const when = p.repeat ? '🔁 every month on the ' + ordinal(+p.date.slice(8)) : niceDate(p.date);
+      const headTag = p.type === 'expense' ? (Store.headOf(p) === 'need' ? '🧱 Need' : '🎈 Want') : '';
+      const bits = [p.type === 'expense' ? d.sub + ' · ' + headTag : typeLabel + (p.person ? '' : ' · ' + esc(p.category)), when, p.mode].filter(Boolean).join(' · ');
+      return `<button class="pv" data-i="${i}"><span class="ico">${Parser.iconFor(p.type, p.category)}</span>
+        <span class="what"><b>${d.title}</b><span>${bits}</span></span>
+        <span class="amt">${inr(p.amount)}</span><span class="edit">Edit</span></button>`;
+    }).join('');
+  }
+  let pvTimer;
+  quick.addEventListener('input', () => { autoGrow(); clearTimeout(pvTimer); pvTimer = setTimeout(renderPreview, 150); });
+  quick.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); renderPreview(); addParsed(); } });
+
+  // Tap a preview line to adjust it before saving.
+  $('#preview').addEventListener('click', (e) => {
+    const b = e.target.closest('.pv[data-i]');
+    if (!b) return;
+    const i = +b.dataset.i;
+    openSheet({ mode: 'draft', rec: Object.assign({ source: 'text' }, parsed[i]), draftIndex: i });
+  });
+
+  function removeDraftPiece(i) {
+    quick.value = parsed.filter((_, j) => j !== i).map((p) => p.raw).join(', ');
+    autoGrow(); renderPreview();
+  }
+
+  function addParsed() {
+    const good = parsed.filter((p) => p.ok);
+    if (!good.length) return;
+    const bad = parsed.filter((p) => !p.ok);
+    const monthly = good.filter((p) => p.repeat);
+    for (const p of monthly) {
+      Store.addRule({ type: p.type, amount: p.amount, category: p.category, note: p.note, mode: p.mode, day: +p.date.slice(8), startMonth: p.date.slice(0, 7) });
+    }
+    if (monthly.length) {
+      Store.applyRecurring(); Store.save();
+      if (monthly.length === good.length) {
+        quick.value = bad.map((p) => p.raw).join(', ');
+        autoGrow(); renderPreview();
+        const m = monthly[0];
+        toast(monthly.length === 1 ? '🔁 ' + (m.note || m.category) + ' ' + inr(m.amount) + ' will be added every month on the ' + ordinal(+m.date.slice(8)) : '🔁 ' + monthly.length + ' monthly entries set up');
+        return;
+      }
+    }
+    const added = Store.addMany(good.filter((p) => !p.repeat).map((p) => ({ type: p.type, amount: p.amount, category: p.category, person: p.person, note: p.note, date: p.date, mode: p.mode, bucket: p.bucket || '', raw: p.raw, source: p.source || 'text' })));
+    quick.value = bad.map((p) => p.raw).join(', ');
+    autoGrow(); renderPreview();
+    const total = added.reduce((s, t) => s + t.amount, 0);
+    toast(added.length === 1 ? 'Added ' + inr(total) + ' · ' + (added[0].person || added[0].category) : 'Added ' + added.length + ' entries (' + inr(total) + ')', 'Undo', () => {
+      added.forEach((t) => Store.remove(t.id));
+      toast('Removed');
+    });
+  }
+  $('#btn-add').addEventListener('click', addParsed);
+  $('#examples').addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    quick.value = e.target.textContent;
+    autoGrow(); renderPreview(); quick.focus();
+  });
+
+  /* ---------- Voice input --------------------------------------------- */
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  $('#btn-mic').addEventListener('click', () => {
+    if (!SR) { toast('Voice typing is not available in this browser. Use the mic on your keyboard.'); return; }
+    if (rec) { rec.stop(); return; }
+    rec = new SR();
+    rec.lang = 'en-IN';
+    rec.interimResults = true;
+    const before = quick.value.trim();
+    rec.onresult = (e) => {
+      const said = [...e.results].map((r) => r[0].transcript).join(' ');
+      quick.value = (before ? before + ', ' : '') + said.replace(/\brupees?\b/gi, '').trim();
+      autoGrow(); renderPreview();
+    };
+    rec.onerror = (e) => { if (e.error === 'not-allowed') toast('Please allow microphone access.'); };
+    rec.onend = () => { rec = null; $('#btn-mic').classList.remove('rec'); };
+    rec.start();
+    $('#btn-mic').classList.add('rec');
+    toast('Listening… say e.g. "lunch 150, auto 40"');
+  });
+
+  /* =====================================================================
+   * BILL SCANNING
+   * ===================================================================== */
+  const scanSheet = $('#scan-sheet');
+  $('#btn-scan').addEventListener('click', () => {
+    $('#scan-choose').hidden = false; $('#scan-tip').hidden = false; $('#scan-progress').hidden = true;
+    scanSheet.showModal();
+  });
+  $('#scan-camera').addEventListener('click', () => $('#file-camera').click());
+  $('#scan-gallery').addEventListener('click', () => $('#file-gallery').click());
+  ['#file-camera', '#file-gallery'].forEach((id) => $(id).addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!scanSheet.open) scanSheet.showModal();
+    $('#scan-choose').hidden = true; $('#scan-tip').hidden = true; $('#scan-progress').hidden = false;
+    const url = URL.createObjectURL(file);
+    $('#scan-preview').src = url;
+    const fill = $('#scan-fill'), msg = $('#scan-msg');
+    try {
+      const text = await OCR.readBill(file, (p, m) => { fill.style.width = Math.round(p * 100) + '%'; msg.textContent = m; });
+      const bill = Parser.parseBill(text, { learned: Store.get().learned });
+      scanSheet.close();
+      openSheet({
+        mode: 'new',
+        rec: { type: 'expense', amount: bill.amount, category: bill.category, note: bill.merchant || 'Bill', date: bill.date, mode: '', source: 'bill' },
+        bill: Object.assign(bill, { text }),
+      });
+    } catch (err) {
+      msg.textContent = err.message || 'Could not read this bill. Try again with better light.';
+      $('#scan-choose').hidden = false;
+    } finally { URL.revokeObjectURL(url); }
+  }));
+
+  /* =====================================================================
+   * EDIT / ADD SHEET
+   * ===================================================================== */
+  const sheet = $('#sheet');
+  const PEOPLE_TYPES = new Set(['lent', 'borrowed', 'got_back', 'paid_back']);
+  let sheetState = null;
+
+  function fillCategories(type, selected) {
+    const cats = Parser.categoriesFor(type);
+    const names = Object.keys(cats);
+    if (selected && !names.includes(selected)) names.push(selected);
+    $('#f-category').innerHTML = names.map((n) => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('');
+    if (!selected) $('#f-category').value = names[0];
+  }
+  function syncTypeFields() {
+    const type = $('#f-type').value;
+    const isPeople = PEOPLE_TYPES.has(type);
+    $('#f-repeat-wrap').hidden = isPeople;
+    $('#f-person-wrap').hidden = !(isPeople || type === 'expense');
+    $('#f-person-label').textContent = isPeople ? 'Person' : 'Spent on (optional)';
+    $('#f-person').placeholder = isPeople ? '' : 'e.g. Manoj — money you won\'t ask back';
+    $('#f-bucket-wrap').hidden = type !== 'expense';
+    updateBucketAuto();
+    $('#f-cat-wrap').hidden = isPeople;
+    fillCategories(type, isPeople ? 'Personal loan' : (sheetState.rec.type === type ? sheetState.rec.category : ''));
+  }
+  $('#f-type').addEventListener('change', syncTypeFields);
+  function updateBucketAuto() {
+    const h = Store.categoryHead($('#f-category').value);
+    $('#f-bucket').options[0].textContent = 'Auto (' + (h === 'need' ? 'Need' : 'Want') + ' for ' + $('#f-category').value + ')';
+  }
+  $('#f-category').addEventListener('change', updateBucketAuto);
+
+  /** opts: { mode: 'edit'|'new'|'draft', rec, bill?, draftIndex?, onSaved? } */
+  function openSheet(opts) {
+    sheetState = opts;
+    const r = opts.rec;
+    $('#sheet-title').textContent = opts.mode === 'edit' ? 'Edit entry' : opts.bill ? 'Check the bill' : 'New entry';
+    $('#f-type').value = r.type || 'expense';
+    $('#f-amount').value = r.amount != null ? r.amount : '';
+    $('#f-person').value = r.person || '';
+    $('#f-note').value = r.note || '';
+    $('#f-date').value = r.date || todayIso();
+    $('#f-mode').value = r.mode || '';
+    $('#people-list').innerHTML = Store.people().map((p) => `<option value="${esc(p.name)}">`).join('');
+    syncTypeFields();
+    $('#f-category').value = r.category || $('#f-category').value;
+    $('#f-bucket').value = r.bucket || '';
+    updateBucketAuto();
+    $('#f-delete').hidden = opts.mode !== 'edit';
+    const linked = r.recurId && Store.rules().some((x) => x.id === r.recurId);
+    $('#f-repeat').checked = !!(linked || r.repeat);
+    $('#f-repeat-label').textContent = linked ? '🔁 Monthly auto entry — untick to stop future months (change the monthly amount in Settings)' : '🔁 Repeat every month on this date';
+    // Bill details
+    const b = opts.bill;
+    $('#bill-info').hidden = !b;
+    $('#ocr-text-wrap').hidden = !b;
+    if (b) {
+      const bits = [];
+      bits.push(b.amount != null ? '✅ Found total <b>' + inr(b.amount) + '</b>' : '⚠️ Couldn\'t find the total — please type the amount.');
+      if (b.gst) bits.push('GST in this bill: <b>' + inr(b.gst) + '</b>');
+      if (b.gstin) bits.push('GSTIN: ' + esc(b.gstin));
+      $('#bill-info').innerHTML = bits.join('<br>');
+      $('#ocr-text').textContent = b.text || '';
+      if (b.gst && !r.note.includes('GST')) $('#f-note').value = (r.note || 'Bill');
+    }
+    sheet.showModal();
+    if (opts.mode === 'new' && r.amount == null) setTimeout(() => $('#f-amount').focus(), 200);
+  }
+
+  $('#edit-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const s = sheetState;
+    const type = $('#f-type').value;
+    const amount = parseFloat($('#f-amount').value);
+    if (!(amount > 0)) { toast('Please enter an amount.'); $('#f-amount').focus(); return; }
+    const person = $('#f-person').value.trim().replace(/\s+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    if (PEOPLE_TYPES.has(type) && !person) { toast('Whose money? Please add a name.'); $('#f-person').focus(); return; }
+    const rec = {
+      type, amount,
+      category: PEOPLE_TYPES.has(type) ? 'Personal loan' : $('#f-category').value,
+      person: (PEOPLE_TYPES.has(type) || type === 'expense') ? person : '',
+      note: $('#f-note').value.trim(),
+      date: $('#f-date').value || todayIso(),
+      mode: $('#f-mode').value,
+      bucket: type === 'expense' ? $('#f-bucket').value : '',
+    };
+    // Teach the app: if you changed the category, remember it for this description/shop.
+    const orig = s.rec;
+    const catChanged = !PEOPLE_TYPES.has(type) && (orig.category !== rec.category || orig.type !== type);
+    if (catChanged && rec.note) {
+      const phrase = s.bill ? (s.bill.merchant || rec.note) : rec.note;
+      Store.learn(phrase, type, rec.category);
+    }
+    const wantRepeat = !PEOPLE_TYPES.has(type) && $('#f-repeat').checked;
+    const linkedRule = orig.recurId && Store.rules().find((x) => x.id === orig.recurId);
+    let saved;
+    if (s.mode === 'edit') {
+      saved = Store.update(orig.id, rec);
+    } else {
+      saved = Store.add(Object.assign(rec, { source: orig.source || 'manual', raw: orig.raw || '' }));
+      if (s.mode === 'draft') removeDraftPiece(s.draftIndex);
+    }
+    if (wantRepeat && !linkedRule) {
+      const rule = Store.addRule({ type, amount, category: rec.category, note: rec.note, mode: rec.mode, day: +rec.date.slice(8), startMonth: rec.date.slice(0, 7) });
+      Store.linkToRule(saved.id, rule);
+      Store.applyRecurring(); Store.save();
+      toast('🔁 Will be added every month on the ' + ordinal(rule.day));
+    } else if (!wantRepeat && linkedRule) {
+      Store.removeRule(linkedRule.id); Store.save();
+      toast('Saved. Future months stopped.');
+    } else {
+      toast(s.mode === 'edit' ? 'Saved' : 'Added ' + inr(amount));
+    }
+    sheet.close();
+    if (s.onSaved) s.onSaved();
+  });
+
+  $('#f-delete').addEventListener('click', () => {
+    const id = sheetState.rec.id;
+    Store.remove(id);
+    sheet.close();
+    toast('Deleted', 'Undo', () => Store.restore(id));
+  });
+
+  /* =====================================================================
+   * HOME
+   * ===================================================================== */
+  function renderHome() {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth();
+    const t = Store.totals(monthStart(y, m), monthEnd(y, m));
+    const day = now.getDate(), days = new Date(y, m + 1, 0).getDate();
+    $('#hero-month').textContent = monthName(y, m);
+    $('#hero-sub').textContent = t.expense ? 'avg ' + inr(Math.round(t.expense / day)) + '/day' : '';
+    const plan = Store.budgetPlan(y, m);
+    $('#hero-left').textContent = inr(Math.round(plan.totalLeft));
+    $('#hero-left').classList.toggle('neg', plan.totalLeft < 0);
+    const prevName = new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'short' });
+    const showCarry = Store.get().settings.carryForward !== false && (plan.carry || plan.hasEarlier);
+    $('#hero-carry').hidden = !showCarry;
+    if (showCarry) {
+      const sign = plan.carry < 0 ? '−' : '+';
+      $('#hero-carry').innerHTML = 'This month <b>' + inr(Math.round(plan.monthLeft)) + '</b> ' + sign +
+        ' from ' + prevName + ' <b class="' + (plan.carry < 0 ? 'neg-ink' : '') + '">' + inr(Math.abs(Math.round(plan.carry))) + '</b>';
+    }
+    renderPlan($('#plan-body'), plan, true);
+    $('#plan-title').textContent = 'Budget plan · ' + plan.split.join('/');
+    $('#t-spent').textContent = inr(Math.round(t.expense));
+    $('#t-income').textContent = inr(Math.round(t.income));
+    $('#t-saved').textContent = inr(Math.round(t.saving));
+
+    const budget = +Store.get().settings.budget || 0;
+    $('#budget-box').hidden = !budget;
+    if (budget) {
+      const used = t.expense / budget;
+      const left = budget - t.expense;
+      $('#budget-text').textContent = inr(Math.round(t.expense)) + ' of ' + inr(budget) + (left >= 0 ? ' · ' + inr(Math.round(left / Math.max(1, days - day + 1))) + '/day left' : ' · over by ' + inr(Math.round(-left)));
+      const f = $('#budget-fill');
+      f.style.width = Math.min(100, used * 100) + '%';
+      f.className = used > 1 ? 'danger' : used > day / days + 0.1 ? 'warn' : '';
+    }
+
+    const ppl = Store.people();
+    const oweMe = ppl.reduce((s, p) => s + Math.max(0, p.balance), 0);
+    const iOwe = ppl.reduce((s, p) => s + Math.max(0, -p.balance), 0);
+    $('#people-card').hidden = !(oweMe || iOwe);
+    $('#pc-owe-me').textContent = inr(oweMe);
+    $('#pc-i-owe').textContent = inr(iOwe);
+
+    const rules = Store.rules().filter((r) => r.active);
+    $('#auto-card').hidden = !rules.length;
+    if (rules.length) {
+      const upcoming = rules.map((r) => ({ r, d: Store.nextRun(r) })).filter((x) => x.d).sort((a, b) => a.d.localeCompare(b.d));
+      $('#auto-title').textContent = rules.length + ' monthly auto ' + (rules.length === 1 ? 'entry' : 'entries');
+      $('#auto-sub').textContent = upcoming.length ? 'Next: ' + (upcoming[0].r.note || upcoming[0].r.category) + ' ' + inr(upcoming[0].r.amount) + ' on ' + shortDate(upcoming[0].d) : '';
+    }
+
+    const recent = Store.active().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
+    $('#recent').innerHTML = recent.length ? recent.map((t) => rowHTML(t, { showDate: true })).join('')
+      : '<p class="empty">Nothing yet. Type <b>chai 20</b> above and tap Add — that\'s it!</p>';
+  }
+  $('#people-card').addEventListener('click', () => go('people'));
+  $('#auto-card').addEventListener('click', () => { go('settings'); setTimeout(() => $('#rules-card').scrollIntoView({ behavior: 'smooth' }), 250); });
+  $('#plan-edit').addEventListener('click', () => { go('settings'); setTimeout(() => $('#plan-settings').scrollIntoView({ behavior: 'smooth' }), 250); });
+
+  /** Draw the Needs / Wants / Savings rows (+ carried money) into el. */
+  function renderPlan(el, plan, isCurrent) {
+    const [y, m] = plan.month.split('-').map(Number);
+    const prevName = new Date(y, m - 2, 1).toLocaleString('en-IN', { month: 'long' });
+    const now = new Date();
+    const daysIn = new Date(y, m, 0).getDate();
+    const pace = isCurrent ? now.getDate() / daysIn : 1; // how far through the month we are
+    let html = '';
+    if (!plan.base) {
+      html += '<p class="muted small plan-base">Add your income (type <b>salary 55000</b>) or set a fixed amount in Settings to see how much you can spend under each head.</p>';
+    } else {
+      html += `<p class="muted small plan-base">Based on ${esc(plan.baseSource)}: <b>${inr(Math.round(plan.base))}</b></p>`;
+    }
+    const icons = { need: '🧱', want: '🎈', saving: '🐷' };
+    for (const h of plan.heads) {
+      const ratio = h.budget ? h.used / h.budget : (h.used ? 2 : 0);
+      let right, sub, cls;
+      if (h.key === 'saving') {
+        right = h.left > 0 ? inr(Math.round(h.left)) + ' to go' : '✓ target met';
+        sub = 'Saved ' + inr(Math.round(h.used)) + (h.budget ? ' of ' + inr(h.budget) + ' target' : '');
+        cls = 'save';
+      } else {
+        right = h.left >= 0 ? inr(Math.round(h.left)) + ' left' : 'Over by ' + inr(Math.round(-h.left));
+        sub = 'Spent ' + inr(Math.round(h.used)) + (h.budget ? ' of ' + inr(h.budget) : '');
+        cls = ratio > 1 ? 'danger' : ratio > pace + 0.1 ? 'warn' : '';
+        if (isCurrent && h.left > 0 && h.budget) {
+          const daysLeft = daysIn - now.getDate() + 1;
+          sub += ' · ' + inr(Math.round(h.left / daysLeft)) + '/day';
+        }
+      }
+      html += `<div class="head-row">
+        <div class="head-top"><span class="head-name">${icons[h.key]} ${h.label}<small>${h.pct}%</small></span><span class="head-left ${h.key !== 'saving' && h.left < 0 ? 'over' : ''}">${right}</span></div>
+        <div class="head-sub">${sub}</div>
+        <div class="meter"><span class="${cls}" style="width:${Math.min(100, ratio * 100)}%"></span></div>
+      </div>`;
+    }
+    if (plan.carry) {
+      const short = plan.carry < 0;
+      html += `<div class="carry-row"><span>${short ? '⚠️ Shortfall carried from ' : '↪️ Carried forward from '}${prevName}</span><b class="${short ? 'neg-ink' : 'pos'}">${short ? '−' : '+'}${inr(Math.abs(Math.round(plan.carry)))}</b></div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  /* =====================================================================
+   * HISTORY
+   * ===================================================================== */
+  const hist = { y: new Date().getFullYear(), m: new Date().getMonth(), f: 'all', q: '' };
+  function renderHistory() {
+    $('#h-month').textContent = monthName(hist.y, hist.m);
+    const q = hist.q.trim().toLowerCase();
+    let list = Store.active();
+    if (!q) list = list.filter((t) => t.date >= monthStart(hist.y, hist.m) && t.date <= monthEnd(hist.y, hist.m));
+    if (hist.f === 'people') list = list.filter((t) => PEOPLE_TYPES.has(t.type));
+    else if (hist.f !== 'all') list = list.filter((t) => t.type === hist.f);
+    if (q) list = list.filter((t) => [t.note, t.category, t.person, t.mode, String(t.amount), Parser.TYPES[t.type].label, t.date].join(' ').toLowerCase().includes(q));
+    list.sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+    const spent = list.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const inc = list.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    $('#h-summary').textContent = list.length ? list.length + ' entries' + (spent ? ' · spent ' + inr(Math.round(spent)) : '') + (inc ? ' · income ' + inr(Math.round(inc)) : '') + (q ? ' · all months' : '') : '';
+    $('.month-nav', $('#view-history')).style.visibility = q ? 'hidden' : '';
+
+    let html = '', lastDate = '';
+    const dayTotals = {};
+    list.forEach((t) => { if (t.type === 'expense') dayTotals[t.date] = (dayTotals[t.date] || 0) + t.amount; });
+    for (const t of list) {
+      if (t.date !== lastDate) {
+        html += `<div class="day-head"><span>${niceDate(t.date)}</span><span>${dayTotals[t.date] ? 'spent ' + inr(Math.round(dayTotals[t.date])) : ''}</span></div>`;
+        lastDate = t.date;
+      }
+      html += rowHTML(t);
+    }
+    $('#history').innerHTML = html || '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>';
+  }
+  $('#h-prev').addEventListener('click', () => { hist.m--; if (hist.m < 0) { hist.m = 11; hist.y--; } renderHistory(); });
+  $('#h-next').addEventListener('click', () => { hist.m++; if (hist.m > 11) { hist.m = 0; hist.y++; } renderHistory(); });
+  $('#search').addEventListener('input', (e) => { hist.q = e.target.value; renderHistory(); });
+  $('#h-filters').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip'); if (!c) return;
+    hist.f = c.dataset.f;
+    $$('#h-filters .chip').forEach((x) => x.classList.toggle('on', x === c));
+    renderHistory();
+  });
+
+  /* =====================================================================
+   * PEOPLE (money given / taken)
+   * ===================================================================== */
+  function renderPeople() {
+    const ppl = Store.people();
+    $('#p-owe-me').textContent = inr(ppl.reduce((s, p) => s + Math.max(0, p.balance), 0));
+    $('#p-i-owe').textContent = inr(ppl.reduce((s, p) => s + Math.max(0, -p.balance), 0));
+    const open = ppl.filter((p) => Math.abs(p.balance) >= 0.5);
+    const settled = ppl.filter((p) => Math.abs(p.balance) < 0.5);
+    const row = (p) => {
+      const status = p.balance > 0 ? 'Owes you' : p.balance < 0 ? 'You owe' : 'Settled';
+      return `<button class="row" data-person="${esc(p.key)}">
+        <span class="ico">${esc(p.name.charAt(0).toUpperCase())}</span>
+        <span class="what"><b>${esc(p.name)}</b><span>${status} · last ${niceDate(p.last)}</span></span>
+        <span class="amt ${p.balance > 0 ? 'in' : ''}">${p.balance ? inr(Math.abs(Math.round(p.balance * 100) / 100)) : '✓'}</span>
+      </button>`;
+    };
+    $('#people').innerHTML = (open.length ? open.map(row).join('') : '<p class="empty">No pending money with anyone. 🎉</p>') +
+      (settled.length ? '<div class="day-head"><span>Settled</span></div>' + settled.map(row).join('') : '');
+  }
+  let personKey = null;
+  function openPerson(key) {
+    personKey = key;
+    const p = Store.people().find((x) => x.key === key);
+    if (!p) { $('#person-sheet').close(); return; }
+    $('#ps-name').textContent = p.name;
+    $('#ps-balance').innerHTML = p.balance > 0 ? `${esc(p.name)} owes you <span class="pos">${inr(p.balance)}</span>` : p.balance < 0 ? `You owe ${esc(p.name)} ${inr(-p.balance)}` : 'All settled ✓';
+    $('#ps-add').hidden = false;
+    $('#ps-settle').hidden = Math.abs(p.balance) < 0.5;
+    $('#ps-settle').textContent = p.balance > 0 ? 'Got money back' : 'I paid back';
+    $('#ps-list').innerHTML = p.txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('');
+    if (!$('#person-sheet').open) $('#person-sheet').showModal();
+  }
+  $('#people').addEventListener('click', (e) => { const b = e.target.closest('[data-person]'); if (b) openPerson(b.dataset.person); });
+  $('#ps-list').addEventListener('click', () => $('#person-sheet').close());
+  $('#ps-settle').addEventListener('click', () => {
+    const p = Store.people().find((x) => x.key === personKey);
+    $('#person-sheet').close();
+    openSheet({ mode: 'new', rec: { type: p.balance > 0 ? 'got_back' : 'paid_back', amount: Math.abs(p.balance), person: p.name, note: '', date: todayIso(), source: 'manual' } });
+  });
+  $('#ps-add').addEventListener('click', () => {
+    const p = Store.people().find((x) => x.key === personKey);
+    $('#person-sheet').close();
+    openSheet({ mode: 'new', rec: { type: 'lent', amount: null, person: p.name, note: '', date: todayIso(), source: 'manual' } });
+  });
+
+  /* =====================================================================
+   * REPORTS
+   * ===================================================================== */
+  const rep = { range: 'month', y: new Date().getFullYear(), m: new Date().getMonth() };
+
+  /** Work out the dates for the chosen period (financial year runs April–March). */
+  function reportRange() {
+    const { y, m } = rep;
+    if (rep.range === 'month') return { from: monthStart(y, m), to: monthEnd(y, m), label: monthName(y, m), prev: { from: monthStart(y, m - 1), to: monthEnd(y, m - 1), label: new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'long' }) } };
+    if (rep.range === '3m') return { from: monthStart(y, m - 2), to: monthEnd(y, m), label: monthName(y, m - 2, true) + ' – ' + monthName(y, m, true), prev: { from: monthStart(y, m - 5), to: monthEnd(y, m - 3), label: 'the 3 months before' } };
+    if (rep.range === 'year') {
+      const fy = m >= 3 ? y : y - 1; // FY starts in April
+      return { from: fy + '-04-01', to: (fy + 1) + '-03-31', label: 'FY ' + fy + '–' + String(fy + 1).slice(2), fy, prev: { from: (fy - 1) + '-04-01', to: fy + '-03-31', label: 'last year' } };
+    }
+    const all = Store.active().map((t) => t.date).sort();
+    return { from: all[0] || todayIso(), to: all[all.length - 1] || todayIso(), label: 'All time', prev: null };
+  }
+
+  function step(dir) {
+    if (rep.range === 'month') rep.m += dir;
+    else if (rep.range === '3m') rep.m += 3 * dir;
+    else if (rep.range === 'year') rep.y += dir;
+    const d = new Date(rep.y, rep.m, 1); rep.y = d.getFullYear(); rep.m = d.getMonth();
+    renderReports();
+  }
+  $('#r-prev').addEventListener('click', () => step(-1));
+  $('#r-next').addEventListener('click', () => step(1));
+  $('#r-range').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip'); if (!c) return;
+    rep.range = c.dataset.r; rep.y = new Date().getFullYear(); rep.m = new Date().getMonth();
+    $$('#r-range .chip').forEach((x) => x.classList.toggle('on', x === c));
+    renderReports();
+  });
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-table]');
+    if (!b) return;
+    const t = $('#' + b.dataset.table);
+    t.hidden = !t.hidden;
+    b.textContent = t.hidden ? 'Table' : 'Hide table';
+  });
+
+  function pctChange(a, b) { return b ? Math.round(((a - b) / b) * 100) : null; }
+
+  function renderReports() {
+    const r = reportRange();
+    $('#r-label').textContent = r.label;
+    $$('#r-prev, #r-next').forEach((b) => { b.style.visibility = rep.range === 'all' ? 'hidden' : ''; });
+    const t = Store.totals(r.from, r.to);
+    const p = r.prev ? Store.totals(r.prev.from, r.prev.to) : null;
+
+    // Tiles
+    const delta = (a, b, upIsGood) => {
+      const c = p ? pctChange(a, b) : null;
+      if (c == null || !isFinite(c)) return '';
+      return `<span class="tile-delta">${c > 0 ? '▲' : c < 0 ? '▼' : '='} ${Math.abs(c)}% vs ${esc(r.prev.label)}</span>`;
+    };
+    $('#r-tiles').innerHTML = `
+      <div class="tile big"><span class="dot" style="background:var(--c-spend)"></span><span class="tile-label">Spent</span><span class="tile-value">${inr(Math.round(t.expense))}</span>${delta(t.expense, p && p.expense)}</div>
+      <div class="tile big"><span class="dot" style="background:var(--c-income)"></span><span class="tile-label">Income</span><span class="tile-value">${inr(Math.round(t.income))}</span>${delta(t.income, p && p.income)}</div>
+      <div class="tile big"><span class="dot" style="background:var(--c-save)"></span><span class="tile-label">Saved</span><span class="tile-value">${inr(Math.round(t.saving))}</span><span class="tile-delta">${t.income ? t.savingsRate + '% of income' : '&nbsp;'}</span></div>
+      <div class="tile big"><span class="tile-label">Money left</span><span class="tile-value ${t.left < 0 ? '' : 'pos'}">${inr(Math.round(t.left))}</span><span class="tile-delta">${t.count} entries</span></div>`;
+
+    // Budget plan (monthly view only)
+    $('#r-plan-card').hidden = rep.range !== 'month';
+    if (rep.range === 'month') {
+      const plan = Store.budgetPlan(rep.y, rep.m);
+      $('#r-plan-title').textContent = 'Budget plan · ' + plan.split.join('/');
+      const now = new Date();
+      renderPlan($('#r-plan'), plan, rep.y === now.getFullYear() && rep.m === now.getMonth());
+    }
+
+    // Categories
+    const cats = Store.byCategory(r.from, r.to);
+    Charts.barList($('#r-cats'), cats.map((c) => ({ label: c.category, icon: Parser.iconFor('expense', c.category), amount: c.amount })), { empty: 'No spending in this period.' });
+    const catTotal = cats.reduce((s, c) => s + c.amount, 0);
+    $('#r-cat-table').innerHTML = `<table><thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Share</th></tr></thead><tbody>${cats.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${inr(Math.round(c.amount))}</td><td class="num">${catTotal ? Math.round((c.amount / catTotal) * 100) : 0}%</td></tr>`).join('')}<tr><th>Total</th><th class="num">${inr(Math.round(catTotal))}</th><th></th></tr></tbody></table>`;
+
+    // Daily (month) or monthly (longer periods) spending
+    if (rep.range === 'month') {
+      $('#r-daily-title').textContent = 'Spending each day';
+      const days = Store.byDay(rep.y, rep.m);
+      Charts.columns($('#r-daily'), {
+        labels: days.map((d) => String(d.day)),
+        titles: days.map((d) => new Date(rep.y, rep.m, d.day).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })),
+        series: [{ name: 'Spent', color: 'var(--c-spend)', values: days.map((d) => d.amount) }],
+        labelEvery: 5, height: 180, aria: 'Spending each day',
+      });
+    } else {
+      $('#r-daily-title').textContent = 'Spending each month';
+      const a = new Date(r.from + 'T00:00:00'), b = new Date(r.to + 'T00:00:00');
+      let n = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth() + 1;
+      n = Math.max(1, Math.min(24, n));
+      const months = Store.byMonth(b.getFullYear(), b.getMonth(), n);
+      Charts.columns($('#r-daily'), {
+        labels: months.map((x) => x.label),
+        titles: months.map((x) => x.label + ' ' + x.year),
+        series: [{ name: 'Spent', color: 'var(--c-spend)', values: months.map((x) => x.expense) }],
+        height: 180, aria: 'Spending each month',
+      });
+    }
+
+    // 6-month trend ending at the selected month
+    const endY = rep.range === 'year' ? Math.min(new Date(r.to).getFullYear(), new Date().getFullYear()) : rep.y;
+    const endM = rep.range === 'year' ? (new Date(r.to) > new Date() ? new Date().getMonth() : 2) : rep.m;
+    const trend = Store.byMonth(endY, endM, 6);
+    Charts.columns($('#r-trend'), {
+      labels: trend.map((x) => x.label),
+      titles: trend.map((x) => x.label + ' ' + x.year),
+      series: [
+        { name: 'Income', color: 'var(--c-income)', values: trend.map((x) => x.income) },
+        { name: 'Spent', color: 'var(--c-spend)', values: trend.map((x) => x.expense) },
+        { name: 'Saved', color: 'var(--c-save)', values: trend.map((x) => x.saving) },
+      ],
+      height: 200, aria: 'Income, spent and saved for the last 6 months',
+    });
+    $('#r-trend-table').innerHTML = `<table><thead><tr><th>Month</th><th class="num">Income</th><th class="num">Spent</th><th class="num">Saved</th></tr></thead><tbody>${trend.map((x) => `<tr><td>${x.label} ${x.year}</td><td class="num">${inr(Math.round(x.income))}</td><td class="num">${inr(Math.round(x.expense))}</td><td class="num">${inr(Math.round(x.saving))}</td></tr>`).join('')}</tbody></table>`;
+
+    // By item name (every entry with the same name added up)
+    renderItems(r);
+
+    // Money spent on people (gifts, nothing expected back)
+    const gifts = Store.gifts(r.from, r.to);
+    $('#r-gifts-card').hidden = !gifts.length;
+    if (gifts.length) {
+      $('#r-gifts-total').textContent = inr(Math.round(gifts.reduce((s, g) => s + g.amount, 0))) + ' total';
+      $('#r-gifts').innerHTML = gifts.map((g) => `<button class="item-row" data-gift="${esc(g.key)}">
+        <span class="ico">${esc(g.name.charAt(0).toUpperCase())}</span>
+        <span class="what"><b>${esc(g.name)}</b><span>${g.count} ${g.count === 1 ? 'time' : 'times'} · last ${shortDate(g.last)}</span></span>
+        <span class="amt">${inr(Math.round(g.amount))}</span></button>`).join('');
+    }
+
+    // Payment modes
+    const modes = new Map();
+    Store.active().filter((x) => x.type === 'expense' && x.date >= r.from && x.date <= r.to).forEach((x) => modes.set(x.mode || 'Not set', (modes.get(x.mode || 'Not set') || 0) + x.amount));
+    const modeIcons = { UPI: '📱', Cash: '💵', Card: '💳', Bank: '🏦', 'Not set': '❔' };
+    Charts.barList($('#r-modes'), [...modes.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, icon: modeIcons[k] || '', amount: v })), { color: 'var(--accent)', empty: 'No spending in this period.' });
+
+    // Insights
+    $('#r-insights').innerHTML = insights(r, t, p, cats).map((s) => '<li>' + s + '</li>').join('');
+  }
+
+  let itemQuery = '', itemsExpanded = false;
+  function renderItems(r) {
+    const all = Store.byItem(r.from, r.to);
+    const q = itemQuery.trim().toLowerCase();
+    const list = q ? all.filter((x) => x.key.includes(q) || x.name.toLowerCase().includes(q) || x.category.toLowerCase().includes(q)) : all;
+    const shown = (itemsExpanded || q) ? list : list.slice(0, 8);
+    $('#r-items-count').textContent = all.length ? all.length + ' items' : '';
+    $('#r-items').innerHTML = shown.length ? shown.map((x) => `<button class="item-row" data-item="${esc(x.key)}">
+        <span class="ico">${Parser.iconFor('expense', x.category)}</span>
+        <span class="what"><b>${esc(x.name)}</b><span>${x.count}× · ${esc(x.category)}${x.count > 1 ? ' · avg ' + inr(Math.round(x.avg)) : ''}</span></span>
+        <span class="amt">${inr(Math.round(x.amount))}</span></button>`).join('')
+      : '<p class="empty">' + (q ? 'No item matches "' + esc(itemQuery) + '".' : 'No spending in this period.') + '</p>';
+    const more = $('#r-items-more');
+    more.hidden = !!q || list.length <= 8;
+    more.textContent = itemsExpanded ? 'Show less' : 'Show all ' + list.length + ' items';
+  }
+  $('#r-item-search').addEventListener('input', (e) => { itemQuery = e.target.value; renderItems(reportRange()); });
+  $('#r-items-more').addEventListener('click', () => { itemsExpanded = !itemsExpanded; renderItems(reportRange()); });
+  $('#r-items').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-item]'); if (!b) return;
+    const r = reportRange();
+    const row = Store.byItem(r.from, r.to).find((x) => x.key === b.dataset.item);
+    if (row) openGroup(row.name, row.amount + ' spent on this in ' + r.label, row.txns);
+  });
+  $('#r-gifts').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-gift]'); if (!b) return;
+    const r = reportRange();
+    const g = Store.gifts(r.from, r.to).find((x) => x.key === b.dataset.gift);
+    if (g) openGroup('🎁 ' + g.name, 'Spent on ' + g.name + ' (not a loan)', g.txns);
+  });
+
+  /** Show every entry behind one item / person row, reusing the person sheet. */
+  function openGroup(title, subtitle, txns) {
+    personKey = null;
+    $('#ps-name').textContent = title;
+    const total = txns.reduce((s, t) => s + t.amount, 0);
+    $('#ps-balance').innerHTML = inr(Math.round(total)) + ' <span class="muted small">· ' + txns.length + ' ' + (txns.length === 1 ? 'entry' : 'entries') + '</span>';
+    $('#ps-settle').hidden = true;
+    $('#ps-add').hidden = true;
+    $('#ps-list').innerHTML = txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('');
+    $('#person-sheet').showModal();
+  }
+
+  function insights(r, t, p, cats) {
+    const out = [];
+    const list = Store.active().filter((x) => x.date >= r.from && x.date <= r.to);
+    if (!list.length) return ['No entries in this period yet.'];
+    if (cats.length) {
+      const total = cats.reduce((s, c) => s + c.amount, 0);
+      out.push(`Your biggest spend was <b>${esc(cats[0].category)}</b>: ${inr(Math.round(cats[0].amount))} (${Math.round((cats[0].amount / total) * 100)}% of spending).`);
+    }
+    if (p && p.expense && t.expense) {
+      const c = pctChange(t.expense, p.expense);
+      out.push(c > 0 ? `You spent <b>${c}% more</b> than ${esc(r.prev.label)} (${inr(Math.round(t.expense - p.expense))} extra).` : c < 0 ? `You spent <b>${-c}% less</b> than ${esc(r.prev.label)} — well done! 👏` : `Same spending as ${esc(r.prev.label)}.`);
+      const prevCats = new Map(Store.byCategory(r.prev.from, r.prev.to).map((c) => [c.category, c.amount]));
+      const jump = cats.map((c) => ({ c: c.category, d: c.amount - (prevCats.get(c.category) || 0) })).sort((a, b) => b.d - a.d)[0];
+      if (jump && jump.d > 0 && jump.d >= t.expense * 0.05) out.push(`<b>${esc(jump.c)}</b> went up the most: +${inr(Math.round(jump.d))}.`);
+    }
+    const items = Store.byItem(r.from, r.to).filter((x) => x.count > 1);
+    if (items.length) out.push(`You spent most often on <b>${esc(items[0].name)}</b>: ${inr(Math.round(items[0].amount))} across ${items[0].count} entries.`);
+    const big = list.filter((x) => x.type === 'expense').sort((a, b) => b.amount - a.amount)[0];
+    if (big) out.push(`Biggest single spend: ${inr(big.amount)} on ${esc(big.note || big.category)} (${niceDate(big.date)}).`);
+    const days = Math.max(1, Math.round((Math.min(new Date(r.to + 'T00:00:00'), new Date()) - new Date(r.from + 'T00:00:00')) / 864e5) + 1);
+    if (t.expense) out.push(`Average spending: ${inr(Math.round(t.expense / days))} per day.`);
+    if (t.income) out.push(t.saving ? `You saved <b>${t.savingsRate}%</b> of your income.${t.savingsRate < 20 ? ' Try for 20%+ — e.g. set up a SIP on salary day.' : ' 💪'}` : 'Nothing marked as saved yet — type e.g. <b>sip 5000</b> when you invest.');
+    else out.push('Add your income (e.g. <b>salary 55000</b>) to see how much you save.');
+    const ppl = Store.people().filter((x) => x.balance > 0).slice(0, 2);
+    ppl.forEach((x) => out.push(`${esc(x.name)} still owes you ${inr(x.balance)}.`));
+    return out;
+  }
+
+  /* ---------- Downloads -------------------------------------------------- */
+  const fileLabel = () => reportRange().label.replace(/[^\w]+/g, '-').replace(/-+$/, '');
+  $('#dl-csv').addEventListener('click', () => {
+    const r = reportRange();
+    download('Kaasu-' + fileLabel() + '.csv', Store.toCSV(r.from, r.to), 'text/csv');
+    toast('Downloaded — open it with Excel or Google Sheets.');
+  });
+  $('#dl-json').addEventListener('click', backupDownload);
+  $('#dl-pdf').addEventListener('click', () => {
+    buildPrintReport();
+    toast(IS_IOS ? 'In the print screen, tap Share (□↑) → Save to Files to keep it as a PDF.' : 'Choose "Save as PDF" as the printer.');
+    setTimeout(() => window.print(), 300);
+  });
+  $('#dl-drive').addEventListener('click', async () => {
+    const r = reportRange();
+    try {
+      if (!Drive.isConfigured()) { toast('Set up Google Drive in Settings first.'); go('settings'); return; }
+      if (!Drive.hasToken()) await Drive.connect();
+      await Drive.saveReport('Kaasu ' + r.label + '.csv', Store.toCSV(r.from, r.to), 'text/csv');
+      toast('Saved in Drive → Expense Tracker → Reports');
+    } catch (e) { toast(e.message); }
+  });
+
+  function buildPrintReport() {
+    const r = reportRange();
+    const t = Store.totals(r.from, r.to);
+    const cats = Store.byCategory(r.from, r.to);
+    const catTotal = cats.reduce((s, c) => s + c.amount, 0);
+    const list = Store.active().filter((x) => x.date >= r.from && x.date <= r.to).sort((a, b) => a.date.localeCompare(b.date));
+    const ppl = Store.people().filter((p) => Math.abs(p.balance) >= 0.5);
+    const html = `
+      <h1>Kaasu — Money report</h1>
+      <div>${esc(r.label)} (${r.from} to ${r.to}) · generated ${new Date().toLocaleString('en-IN')}</div>
+      <div class="ptiles">
+        <div>Spent<b>${inr(Math.round(t.expense))}</b></div><div>Income<b>${inr(Math.round(t.income))}</b></div>
+        <div>Saved<b>${inr(Math.round(t.saving))}</b></div><div>Money left<b>${inr(Math.round(t.left))}</b></div>
+      </div>
+      ${rep.range === 'month' ? (() => { const pl = Store.budgetPlan(rep.y, rep.m); return `<h2>Budget plan (${pl.split.join('/')})${pl.base ? ' on ' + inr(Math.round(pl.base)) : ''}</h2><table><thead><tr><th>Head</th><th class="num">Budget</th><th class="num">Used</th><th class="num">Left</th></tr></thead><tbody>${pl.heads.map((h) => `<tr><td>${h.label} (${h.pct}%)</td><td class="num">${inr(h.budget)}</td><td class="num">${inr(Math.round(h.used))}</td><td class="num">${inr(Math.round(h.left))}</td></tr>`).join('')}${pl.carry ? `<tr><td>Carried forward</td><td></td><td></td><td class="num">${inr(Math.round(pl.carry))}</td></tr>` : ''}</tbody></table>`; })() : ''}
+      <h2>Quick insights</h2><ul>${insights(r, t, r.prev ? Store.totals(r.prev.from, r.prev.to) : null, cats).map((s) => '<li>' + s + '</li>').join('')}</ul>
+      <h2>Where the money went</h2>
+      <div id="print-bars"></div>
+      <table><thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Share</th></tr></thead><tbody>
+      ${cats.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${inr(Math.round(c.amount))}</td><td class="num">${catTotal ? Math.round((c.amount / catTotal) * 100) : 0}%</td></tr>`).join('')}</tbody></table>
+      ${ppl.length ? `<h2>Money given & taken (pending)</h2><table><thead><tr><th>Person</th><th>Status</th><th class="num">Amount</th></tr></thead><tbody>${ppl.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.balance > 0 ? 'Owes you' : 'You owe'}</td><td class="num">${inr(Math.abs(p.balance))}</td></tr>`).join('')}</tbody></table>` : ''}
+      ${(() => { const its = Store.byItem(r.from, r.to); return its.length ? `<h2>By item name</h2><table><thead><tr><th>Item</th><th>Category</th><th class="num">Times</th><th class="num">Total</th></tr></thead><tbody>${its.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.category)}</td><td class="num">${x.count}</td><td class="num">${inr(Math.round(x.amount))}</td></tr>`).join('')}</tbody></table>` : ''; })()}
+      ${(() => { const gs = Store.gifts(r.from, r.to); return gs.length ? `<h2>Spent on people (not loans)</h2><table><thead><tr><th>Person</th><th class="num">Times</th><th class="num">Total</th></tr></thead><tbody>${gs.map((g) => `<tr><td>${esc(g.name)}</td><td class="num">${g.count}</td><td class="num">${inr(Math.round(g.amount))}</td></tr>`).join('')}</tbody></table>` : ''; })()}
+      <h2>All entries (${list.length})</h2>
+      <table><thead><tr><th>Date</th><th>Type</th><th>Category / person</th><th>Description</th><th>Paid by</th><th class="num">Amount</th></tr></thead><tbody>
+      ${list.map((x) => `<tr><td>${x.date}</td><td>${Store.TYPE_LABEL[x.type]}</td><td>${esc(x.person || x.category)}</td><td>${esc(x.note)}</td><td>${esc(x.mode)}</td><td class="num">${INFLOW.has(x.type) ? '+' : '−'}${inr(x.amount)}</td></tr>`).join('')}</tbody></table>`;
+    $('#print-report').innerHTML = html;
+    Charts.barList($('#print-bars'), cats.map((c) => ({ label: c.category, icon: Parser.iconFor('expense', c.category), amount: c.amount })));
+  }
+
+  /* =====================================================================
+   * SETTINGS
+   * ===================================================================== */
+  function renderSettings() {
+    $('#origin-hint').textContent = location.origin;
+    $('#redirect-hint').textContent = Drive.redirectUri();
+    $('#client-id').value = Drive.clientId();
+    const connected = Drive.wasConnected();
+    $('#drive-setup').hidden = connected;
+    $('#drive-connect').hidden = connected;
+    $('#drive-connect').disabled = !Drive.isConfigured();
+    $('#drive-sync').hidden = !connected;
+    $('#drive-disconnect').hidden = !connected;
+    $('#drive-status').innerHTML = !Drive.isConfigured() ? 'Not set up yet. Your records are saved on this phone only.'
+      : !connected ? 'Client ID saved. Tap <b>Connect Google Drive</b> and choose your Google account.'
+      : '✅ Connected' + (Drive.account() ? ' as <b>' + esc(Drive.account()) + '</b>' : '') + '. Records are saved in <b>My Drive → Expense Tracker</b>.' +
+        (Drive.lastSync() ? '<br>Last synced: ' + new Date(Drive.lastSync()).toLocaleString('en-IN') + ' · ' + Store.active().length + ' entries' : '') +
+        '<br><span class="muted">Client ID …' + esc(Drive.clientId().split('.')[0].slice(-6)) + ' — must be the same on all your phones.</span>';
+    renderRules();
+    renderPlanSettings();
+    $('#budget').value = Store.get().settings.budget || '';
+    $('#theme').value = localStorage.getItem(THEME_KEY) || '';
+    const learned = Object.entries(Store.get().learned);
+    $('#learned').innerHTML = learned.length ? learned.map(([k, v]) => `<button data-forget="${esc(k)}" title="Tap to forget">${esc(k)} → ${esc(v.category)} ✕</button>`).join('') : '<span class="muted small">Nothing yet.</span>';
+    $('#version').textContent = 'Kaasu v' + APP_VERSION + ' · ' + Store.active().length + ' entries on this phone';
+  }
+  /* ---------- Budget plan settings -------------------------------------- */
+  let customSplit = false; // you picked "Custom…" — keep the % boxes open
+  function renderPlanSettings() {
+    const st = Store.get().settings;
+    const split = st.split || [50, 30, 20];
+    const presets = Store.SPLIT_PRESETS;
+    const idx = presets.findIndex((p) => p.split.join() === split.join());
+    $('#split-preset').innerHTML = presets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('') + '<option value="custom">Custom…</option>';
+    const custom = customSplit || idx < 0;
+    $('#split-preset').value = custom ? 'custom' : String(idx);
+    $('#split-custom').hidden = !custom;
+    $('#split-sum').hidden = !custom;
+    // don't overwrite a box you're typing in
+    [['#split-need', 0], ['#split-want', 1], ['#split-save', 2]].forEach(([id, i]) => { if (document.activeElement !== $(id)) $(id).value = split[i]; });
+    $('#base-mode').value = st.baseMode || 'income';
+    $('#base-amount-wrap').hidden = st.baseMode !== 'fixed';
+    $('#base-amount').value = st.baseAmount || '';
+    $('#carry').checked = st.carryForward !== false;
+    const cats = Object.keys(Parser.EXPENSE_CATEGORIES);
+    $('#cat-heads').innerHTML = cats.map((c) => {
+      const h = Store.categoryHead(c);
+      return `<button class="${h}" data-cat-head="${esc(c)}">${Parser.iconFor('expense', c)} ${esc(c)}: <b>${h === 'need' ? 'Need' : 'Want'}</b></button>`;
+    }).join('');
+  }
+  $('#split-preset').addEventListener('change', (e) => {
+    customSplit = e.target.value === 'custom';
+    if (customSplit) { $('#split-custom').hidden = false; $('#split-sum').hidden = false; checkCustom(); return; }
+    Store.setSetting('split', Store.SPLIT_PRESETS[+e.target.value].split.slice());
+    toast('Split set to ' + Store.get().settings.split.join(' / '));
+  });
+  function checkCustom() {
+    const v = [+$('#split-need').value || 0, +$('#split-want').value || 0, +$('#split-save').value || 0];
+    const sum = v.reduce((a, b) => a + b, 0);
+    $('#split-sum').textContent = sum === 100 ? '✓ Adds up to 100%' : 'Total is ' + sum + '% — make it 100%';
+    $('#split-sum').style.color = sum === 100 ? 'var(--pos)' : 'var(--danger)';
+    if (sum === 100 && v.join() !== (Store.get().settings.split || []).join()) Store.setSetting('split', v);
+  }
+  ['#split-need', '#split-want', '#split-save'].forEach((id) => $(id).addEventListener('input', checkCustom));
+  $('#base-mode').addEventListener('change', (e) => { Store.setSetting('baseMode', e.target.value); });
+  $('#base-amount').addEventListener('change', (e) => Store.setSetting('baseAmount', Math.max(0, +e.target.value || 0)));
+  $('#carry').addEventListener('change', (e) => Store.setSetting('carryForward', e.target.checked));
+  $('#cat-heads').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cat-head]'); if (!b) return;
+    const c = b.dataset.catHead;
+    const map = Object.assign({}, Store.get().settings.bucketMap);
+    const next = Store.categoryHead(c) === 'need' ? 'want' : 'need';
+    if ((next === 'need') === Store.NEED_CATEGORIES.has(c)) delete map[c]; else map[c] = next;
+    Store.setSetting('bucketMap', map);
+  });
+
+  /* ---------- Monthly auto entries ------------------------------------- */
+  function renderRules() {
+    const list = Store.rules().sort((a, b) => (b.active - a.active) || a.day - b.day);
+    $('#rules').innerHTML = list.length ? list.map((r) => {
+      const next = r.active ? Store.nextRun(r) : '';
+      const inflow = r.type === 'income';
+      return `<button class="row ${r.active ? '' : 'paused'}" data-rule="${r.id}">
+        <span class="ico">${Parser.iconFor(r.type, r.category)}</span>
+        <span class="what"><b>${esc(r.note || r.category)}</b><span>${r.active ? 'Every month on the ' + ordinal(r.day) + (next ? ' · next ' + shortDate(next) : '') : '⏸ Paused'}</span></span>
+        <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(r.amount)}</span>
+      </button>`;
+    }).join('') : '<p class="empty">None yet.</p>';
+  }
+  $('#rules').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rule]');
+    if (b) openRule(Store.rules().find((r) => r.id === b.dataset.rule));
+  });
+  $('#rule-add').addEventListener('click', () => openRule(null));
+
+  let ruleEditing = null;
+  function fillRuleCategories(type, selected) {
+    const names = Object.keys(Parser.categoriesFor(type));
+    if (selected && !names.includes(selected)) names.push(selected);
+    $('#r-category').innerHTML = names.map((n) => `<option ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  }
+  $('#r-type').addEventListener('change', (e) => fillRuleCategories(e.target.value, e.target.value === 'income' ? 'Salary' : e.target.value === 'saving' ? 'SIP / Mutual fund' : 'Rent'));
+  function thisMonthEntry(rule) {
+    return rule && Store.get().txns.find((t) => t.recurId === rule.id && t.recurMonth === curYm() && !t.deleted);
+  }
+  function openRule(rule) {
+    ruleEditing = rule;
+    const r = rule || { type: 'expense', amount: '', category: 'Rent', note: '', day: new Date().getDate(), mode: '', active: true };
+    $('#rule-title').textContent = rule ? 'Edit monthly entry' : 'New monthly entry';
+    $('#r-type').value = r.type;
+    fillRuleCategories(r.type, r.category);
+    $('#r-amount').value = r.amount;
+    $('#r-note').value = r.note || '';
+    $('#r-day').value = r.day;
+    $('#r-mode').value = r.mode || '';
+    $('#r-active').checked = r.active !== false;
+    $('#r-delete').hidden = !rule;
+    const cur = thisMonthEntry(rule);
+    $('#r-now-wrap').hidden = !!rule && !cur;
+    $('#r-now').checked = true;
+    $('#r-now-label').textContent = rule ? 'Also change this month\'s entry (' + inr(cur ? cur.amount : 0) + ')' : 'Also add it for this month (if the day has come)';
+    $('#r-info').textContent = rule ? 'Changes apply to future months. Past entries stay as they are — tap one in History to edit it.' : 'Kaasu adds it automatically when you open the app on or after that day.';
+    $('#rule-sheet').showModal();
+  }
+  $('#rule-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const amount = parseFloat($('#r-amount').value);
+    if (!(amount > 0)) { toast('Please enter an amount.'); return; }
+    const day = parseInt($('#r-day').value, 10);
+    if (!(day >= 1 && day <= 31)) { toast('Day must be between 1 and 31.'); return; }
+    const vals = { type: $('#r-type').value, amount, category: $('#r-category').value, note: $('#r-note').value.trim() || $('#r-category').value, day, mode: $('#r-mode').value, active: $('#r-active').checked };
+    if (ruleEditing) {
+      const cur = thisMonthEntry(ruleEditing);
+      Store.updateRule(ruleEditing.id, vals);
+      if (cur && $('#r-now').checked) Store.update(cur.id, { type: vals.type, amount, category: vals.category, note: vals.note, mode: vals.mode });
+      toast('Monthly entry updated');
+    } else {
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const startMonth = $('#r-now').checked ? curYm() : next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0');
+      Store.addRule(Object.assign(vals, { startMonth }));
+      toast('🔁 ' + vals.note + ' ' + inr(amount) + ' every month on the ' + ordinal(day));
+    }
+    Store.applyRecurring();
+    Store.save();
+    $('#rule-sheet').close();
+  });
+  $('#r-delete').addEventListener('click', () => {
+    if (!confirm('Stop this monthly entry? Entries already added stay in your history.')) return;
+    Store.removeRule(ruleEditing.id);
+    Store.save();
+    $('#rule-sheet').close();
+    toast('Monthly entry removed');
+  });
+
+  $('#save-client').addEventListener('click', () => {
+    const v = $('#client-id').value.trim();
+    if (v && !/\.apps\.googleusercontent\.com$/.test(v)) { toast('That doesn\'t look right — it should end with .apps.googleusercontent.com'); return; }
+    Drive.setClientId(v);
+    toast(v ? 'Client ID saved. Now tap Connect.' : 'Client ID removed.');
+    renderSettings();
+  });
+  $('#drive-connect').addEventListener('click', () => doSync(true));
+  $('#drive-sync').addEventListener('click', () => doSync(true));
+  $('#drive-disconnect').addEventListener('click', () => {
+    if (!confirm('Stop saving to Google Drive? Your data stays on this phone and in Drive.')) return;
+    Drive.disconnect(); setPill(); renderSettings();
+  });
+  $('#budget').addEventListener('change', (e) => Store.setSetting('budget', Math.max(0, +e.target.value || 0)));
+  $('#theme').addEventListener('change', (e) => { localStorage.setItem(THEME_KEY, e.target.value); applyTheme(e.target.value); render(); });
+  $('#learned').addEventListener('click', (e) => { const b = e.target.closest('[data-forget]'); if (b) Store.forget(b.dataset.forget); });
+
+  function backupDownload() {
+    download('Kaasu-backup-' + todayIso() + '.json', JSON.stringify(Store.get(), null, 1), 'application/json');
+    toast('Backup downloaded. Keep it somewhere safe.');
+  }
+  $('#backup-dl').addEventListener('click', backupDownload);
+  $('#backup-restore').addEventListener('click', () => $('#file-restore').click());
+  $('#file-restore').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try {
+      const incoming = JSON.parse(await f.text());
+      if (!incoming || !Array.isArray(incoming.txns)) throw new Error('bad');
+      Store.replaceAll(Store.merge(Store.get(), incoming));
+      toast('Restored ' + incoming.txns.filter((t) => !t.deleted).length + ' entries.');
+    } catch (err) { toast('That file is not a Kaasu backup.'); }
+  });
+  $('#erase').addEventListener('click', () => {
+    if (!confirm('Erase ALL entries on this phone? (Google Drive copy is not touched.)')) return;
+    if (prompt('Type ERASE to confirm') !== 'ERASE') return;
+    Store.replaceAll(Store.emptyData(), { silent: true });
+    render(); toast('Erased.');
+  });
+
+  /* ---------- Install as an app ----------------------------------------- */
+  let installEvt = null;
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#btn-install').hidden = false; });
+  $('#btn-install').addEventListener('click', async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    await installEvt.userChoice;
+    installEvt = null; $('#btn-install').hidden = true;
+  });
+  // The APK link is only useful on Android phones that aren't already running the app
+  $('#apk-link').hidden = IS_IOS || IS_STANDALONE;
+  if (IS_STANDALONE) {
+    $('#install-text').textContent = '✅ Installed. Open Kaasu from your home screen.';
+  }
+  // iPhone / iPad: there is no "Install" button — show how to add it to the Home Screen.
+  const IOS_TIP_KEY = 'expense-tracker.iosTipClosed';
+  if (IS_IOS && !IS_STANDALONE && !localStorage.getItem(IOS_TIP_KEY)) {
+    const share = '<svg class="ios-share" viewBox="0 0 24 24"><path d="M12 3v12M8 7l4-4 4 4M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>';
+    const inSafari = !/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(navigator.userAgent);
+    $('#ios-steps').innerHTML = (inSafari ? '' : '<li>Best in <b>Safari</b>: copy this link and open it in Safari (Chrome on newer iPhones also works via its Share button).</li>') +
+      '<li>Tap the <b>Share</b> button ' + share + ' (bottom bar in Safari).</li>' +
+      '<li>Scroll down and tap <b>Add to Home Screen</b>.</li>' +
+      '<li>Tap <b>Add</b>. Open Kaasu from the new icon on your Home Screen.</li>';
+    $('#ios-install').hidden = false;
+  }
+  $('#ios-install-close').addEventListener('click', () => { localStorage.setItem(IOS_TIP_KEY, '1'); $('#ios-install').hidden = true; });
+
+  /* =====================================================================
+   * GOOGLE DRIVE SYNC
+   * ===================================================================== */
+  let syncTimer = null, syncing = false, dirty = false;
+
+  function setPill(state, text) {
+    const p = $('#sync-pill');
+    if (!Drive.isConfigured() || !Drive.wasConnected()) { p.hidden = true; return; }
+    p.hidden = false;
+    state = state || (Drive.hasToken() ? (dirty ? 'busy' : 'ok') : 'warn');
+    p.className = 'pill ' + state;
+    $('span', p).textContent = text || (state === 'ok' ? 'Saved' : state === 'busy' ? 'Saving…' : 'Tap to sync');
+  }
+  $('#sync-pill').addEventListener('click', () => doSync(true));
+
+  function scheduleSync() {
+    if (!Drive.isConfigured() || !Drive.wasConnected()) return;
+    dirty = true;
+    if (!Drive.hasToken()) { setPill('warn'); return; }
+    setPill('busy');
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => doSync(false), 2500);
+  }
+
+  /** interactive = true when the user tapped a button (allowed to show Google sign-in). */
+  async function doSync(interactive) {
+    if (syncing) return;
+    try {
+      if (!Drive.isConfigured()) { go('settings'); toast('Add your Google Client ID first.'); return; }
+      if (!Drive.hasToken()) {
+        if (!interactive) { setPill('warn'); return; }
+        await Drive.connect();
+      }
+      syncing = true; dirty = false;
+      setPill('busy', 'Syncing…');
+      const merged = await Drive.sync(Store.get(), Store.merge, (d) => Store.toCSV(null, null, d.txns));
+      // Merge again in case something was added while we were uploading.
+      Store.replaceAll(Store.merge(Store.get(), merged), { silent: true });
+      if (Store.applyRecurring().length) scheduleSync();
+      setPill('ok');
+      if (interactive) toast('Saved to Google Drive ✓');
+      render();
+    } catch (e) {
+      setPill('warn', e.needsTap ? 'Tap to sync' : 'Sync failed');
+      if (interactive || !e.needsTap) toast(e.message);
+    } finally {
+      syncing = false;
+      if (dirty) scheduleSync();
+      if (current === 'settings') renderSettings();
+    }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') Store.applyRecurring(); // e.g. app left open overnight into the 1st
+    if (document.visibilityState === 'hidden' && dirty && Drive.hasToken()) { clearTimeout(syncTimer); doSync(false); }
+  });
+
+  /* =====================================================================
+   * START
+   * ===================================================================== */
+  function render() {
+    if (current === 'home') renderHome();
+    else if (current === 'history') renderHistory();
+    else if (current === 'people') renderPeople();
+    else if (current === 'reports') renderReports();
+    else if (current === 'settings') renderSettings();
+  }
+
+  Store.load();
+  Store.applyRecurring(); // add any monthly entries that became due since last time
+  setInterval(() => Store.applyRecurring(), 60 * 60 * 1000);
+  Store.onChange(() => { render(); scheduleSync(); if ($('#person-sheet').open) openPerson(personKey); });
+  let resizeT;
+  window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (current === 'reports') renderReports(); }, 200); });
+
+  show(location.hash.slice(1) || 'home');
+  setPill();
+  const rr = Drive.redirectResult();
+  if (rr && rr.error) { setTimeout(() => toast(rr.error), 500); go('settings'); }
+  if (Drive.wasConnected() && Drive.hasToken()) doSync(!!(rr && rr.ok));
+
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  // Handy for testing in the browser console.
+  window.Kaasu = { Store, Parser, version: APP_VERSION };
+})();
