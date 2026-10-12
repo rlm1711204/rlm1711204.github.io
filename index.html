@@ -237,6 +237,31 @@
         </div>
       </div>
 
+      <div class="card" id="ai-card">
+        <h3>🤖 AI bill reading (optional)</h3>
+        <p class="muted small">With a free AI key, Kaasu reads bill photos much more accurately and can read <b>PDF bills and statements</b> (PhonePe, Paytm, bank) — every transaction at once. Keys stay on this phone only; they're never saved to Google Drive or backups.</p>
+        <label class="check"><input type="checkbox" id="ai-on"> <span>Use AI to read bills and PDFs</span></label>
+
+        <div class="field"><span>Google Gemini keys (free)</span>
+          <ul id="ai-gemini-list" class="key-list"></ul>
+          <div class="key-add"><input id="ai-gemini-new" type="text" placeholder="Paste a Gemini key" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-gemini-add">Add</button></div>
+        </div>
+        <details class="howto">
+          <summary>How do I get a free Gemini key? (2 minutes, no card)</summary>
+          <ol>
+            <li>Open <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"><b>aistudio.google.com/apikey</b></a> and sign in with your Gmail.</li>
+            <li>Tap <b>Create API key</b> (accept the terms if asked) and copy it.</li>
+            <li>Paste it above and tap <b>Add</b>. You can add a key from a second Gmail too — when one reaches its free daily limit, Kaasu uses the next.</li>
+          </ol>
+        </details>
+
+        <div class="field"><span>Claude key (optional, paid)</span>
+          <div class="key-add"><input id="ai-claude" type="password" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-claude-save">Save</button></div>
+          <small class="muted">Used only if Gemini can't read a file. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</small>
+        </div>
+        <p class="muted small" id="ai-status"></p>
+      </div>
+
       <div class="card" id="rules-card">
         <h3>🔁 Monthly auto entries</h3>
         <p class="muted small">Rent, EMI, SIP, salary… set once and Kaasu adds them every month on that day. Tip: type <b>rent 12000 every month on 5th</b>.</p>
@@ -304,6 +329,7 @@
           <li><b>Took:</b> took 500 from kumar · borrowed 2k from anand</li>
           <li><b>Returned:</b> ravi returned 1000 · paid back kumar 500</li>
           <li><b>Dates:</b> yesterday · 2 days ago · last monday · 5/9 · 5 sep</li>
+          <li><b>Bills &amp; statements:</b> tap the scan button → 📷 photo or 📄 PDF (PDFs need a free Gemini key)</li>
           <li><b>Many at once:</b> chai 20, auto 60, milk 30</li>
           <li><b>Given, not a loan:</b> gave manoj 500 gift · paid for dilmaan 300 no return</li>
           <li><b>Budget head:</b> add <b>need</b> or <b>want</b>, e.g. shopping 800 need</li>
@@ -409,15 +435,29 @@
     <div id="ps-list" class="list"></div>
   </dialog>
 
+  <!-- ============ Review many entries (PDF statements) ============ -->
+  <dialog id="import-sheet" class="sheet">
+    <div class="sheet-head">
+      <h2 id="imp-title">Check the entries</h2>
+      <button type="button" class="icon-btn sm" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <p class="muted small" id="imp-sub"></p>
+    <div class="imp-tools"><button class="link small" id="imp-all">Tick all</button><button class="link small" id="imp-none">Untick all</button></div>
+    <div id="imp-list" class="imp-list"></div>
+    <div class="sheet-actions"><button type="button" class="btn primary" id="imp-add">Add</button></div>
+  </dialog>
+
   <!-- ============ Scan sheet ============ -->
   <dialog id="scan-sheet" class="sheet">
     <div class="sheet-head">
       <h2>Scan a bill</h2>
       <button type="button" class="icon-btn sm" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
+    <p id="scan-ai" class="scan-ai small"></p>
     <div id="scan-choose" class="btn-grid">
       <button class="btn primary" id="scan-camera">📷 Take photo</button>
       <button class="btn" id="scan-gallery">🖼️ Choose from gallery</button>
+      <button class="btn" id="scan-pdf">📄 PDF bill or statement</button>
     </div>
     <p class="muted small" id="scan-tip">Tip: lay the bill flat, good light, fill the screen with it.</p>
     <div id="scan-progress" hidden>
@@ -429,6 +469,7 @@
 
   <input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
   <input type="file" id="file-gallery" accept="image/*" hidden>
+  <input type="file" id="file-pdf" accept="application/pdf,.pdf" hidden>
   <input type="file" id="file-restore" accept=".json,application/json" hidden>
 
   <div id="toast" class="toast" role="status" hidden></div>
@@ -438,6 +479,7 @@
   <script src="js/store.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/ocr.js"></script>
+  <script src="js/ai.js"></script>
   <script src="js/drive.js"></script>
   <script src="js/app.js"></script>
 </body>

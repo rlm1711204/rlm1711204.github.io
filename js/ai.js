@@ -1,0 +1,300 @@
+/* =====================================================================
+ * ai.js — optional AI reading of bill photos and PDFs.
+ *
+ * Bring your own key, like the SSC Vocab Vault app:
+ *   • Google Gemini — free key from Google AI Studio (several keys allowed;
+ *     when one hits its free limit the next one is used).
+ *   • Claude (Anthropic) — optional paid key, used when Gemini can't help.
+ *
+ * Keys are kept ONLY on this phone (localStorage). They are never synced to
+ * Google Drive, never put in backups and never sent anywhere except to the
+ * AI service itself. With no key, Kaasu reads photos on the phone (ocr.js).
+ * ===================================================================== */
+(function (root) {
+  'use strict';
+
+  const KEY = 'kaasu.ai.v1';
+  const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
+  // Free-tier Flash models, newest first. "-latest" aliases follow Google's newest
+  // model, so they keep working when versions are retired; named ones are a backup.
+  const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+  const CLAUDE_MODEL = 'claude-opus-5-5';
+  // Official Anthropic SDK, loaded in the browser only when a Claude key is used.
+  const ANTHROPIC_SDK = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.129.0/+esm';
+
+  /* ---------- Settings (this phone only) ------------------------------- */
+
+  function load() {
+    try { return Object.assign({ geminiKeys: [], claudeKey: '', enabled: true }, JSON.parse(localStorage.getItem(KEY) || '{}')); }
+    catch (e) { return { geminiKeys: [], claudeKey: '', enabled: true }; }
+  }
+  let cfg = load();
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) { /* storage full / private mode */ } };
+
+  const clean = (k) => String(k || '').trim().replace(/\s+/g, '');
+  function addGeminiKey(k) {
+    k = clean(k);
+    if (!/^\S{20,}$/.test(k)) throw new Error('That doesn\'t look like a Gemini key. Copy the whole key from Google AI Studio.');
+    if (!cfg.geminiKeys.includes(k)) cfg.geminiKeys.push(k);
+    save();
+  }
+  function removeGeminiKey(i) { cfg.geminiKeys.splice(i, 1); save(); }
+  function setClaudeKey(k) {
+    k = clean(k);
+    if (k && !/^sk-ant-\S{20,}$/.test(k)) throw new Error('A Claude key starts with "sk-ant-". Copy the whole key from the Anthropic Console.');
+    cfg.claudeKey = k; save();
+  }
+  function setEnabled(on) { cfg.enabled = !!on; save(); }
+  const hasKey = () => cfg.geminiKeys.length > 0 || !!cfg.claudeKey;
+  const isOn = () => cfg.enabled && hasKey();
+  const masked = (k) => k ? k.slice(0, 4) + '…' + k.slice(-4) : '';
+
+  /* ---------- What we ask the AI for ----------------------------------- */
+
+  /**
+   * One shape for everything: a photographed bill gives one entry; a PDF
+   * statement (PhonePe, Paytm, bank) gives one entry per transaction.
+   */
+  function schema(categories) {
+    return {
+      type: 'object',
+      additionalProperties: false,
+      required: ['kind', 'gstin', 'entries'],
+      properties: {
+        kind: { type: 'string', enum: ['bill', 'statement', 'other'], description: 'bill = one purchase (receipt, invoice); statement = a list of transactions (bank / UPI / wallet statement).' },
+        gstin: { type: 'string', description: 'Seller GSTIN on a bill, else empty string.' },
+        entries: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['date', 'amount', 'direction', 'merchant', 'description', 'category', 'mode', 'gst'],
+            properties: {
+              date: { type: 'string', description: 'YYYY-MM-DD. Indian documents write dates day-first (05/09/2026 = 5 September 2026).' },
+              amount: { type: 'number', description: 'Rupees, positive. For a bill: the final amount paid (grand total / net payable), not the subtotal.' },
+              direction: { type: 'string', enum: ['out', 'in'], description: 'out = money paid/debited; in = money received/credited (salary, refund, cashback, money from a person).' },
+              merchant: { type: 'string', description: 'Shop / payee / payer name, cleaned up (e.g. "Sri Saravana Bhavan", "Ramesh Kumar"). Empty if unknown.' },
+              description: { type: 'string', description: 'Short note: main items bought or what the transaction was (max 60 characters).' },
+              category: { type: 'string', enum: categories, description: 'Best matching category.' },
+              mode: { type: 'string', enum: ['UPI', 'Card', 'Cash', 'Bank', ''], description: 'How it was paid, if shown.' },
+              gst: { type: 'number', description: 'Total GST (CGST+SGST+IGST) on a bill, else 0.' },
+            },
+          },
+        },
+      },
+    };
+  }
+
+  function instructions(categories) {
+    return [
+      'You read Indian bills, receipts, invoices and bank / UPI / wallet statements for a personal expense tracker.',
+      'Return every money movement you can see in the document as an entry.',
+      'For a bill or receipt: return exactly ONE entry for the final amount paid (grand total / net payable after discounts and round-off), with the main items in description and the GST total in gst.',
+      'For a statement: return one entry per transaction row, in date order. Skip opening/closing balance lines and totals.',
+      'Treat money sent to a person or merchant as out, money received as in. Salary, refunds, cashback and interest are in.',
+      'Pick category from this list only: ' + categories.join(', ') + '.',
+      'Use Indian context: a "hotel" bill is usually a restaurant (Food); kirana / supermarket = Groceries; petrol pump = Fuel; pharmacy = Health.',
+      'Never invent entries. If the document has no money movement, return kind "other" and no entries.',
+    ].join('\n');
+  }
+
+  /* ---------- Files → base64 ------------------------------------------- */
+
+  /** Photos are shrunk to ~1600px JPEG (smaller upload, same readability). PDFs are sent as they are. */
+  async function toPart(file) {
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) {
+      if (file.size > 20 * 1024 * 1024) throw new Error('That PDF is over 20 MB. Download a shorter date range and try again.');
+      return { mime: 'application/pdf', data: await b64(file) };
+    }
+    const blob = await shrink(file, 1600);
+    return { mime: 'image/jpeg', data: await b64(blob) };
+  }
+  function b64(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1] || '');
+      r.onerror = () => reject(new Error('Could not read that file.'));
+      r.readAsDataURL(blob);
+    });
+  }
+  function shrink(file, maxSide) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob((b) => resolve(b || file), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+
+  /* ---------- Google Gemini (REST) -------------------------------------- */
+
+  /** Our JSON Schema → Gemini's responseSchema (upper-case types, no additionalProperties). */
+  function toGeminiSchema(s) {
+    if (Array.isArray(s)) return s.map(toGeminiSchema);
+    if (!s || typeof s !== 'object') return s;
+    const out = {};
+    for (const [k, v] of Object.entries(s)) {
+      if (k === 'additionalProperties') continue;
+      if (k === 'type') out.type = String(v).toUpperCase();
+      else if (k === 'properties') out.properties = Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, toGeminiSchema(pv)]));
+      else if (k === 'items') out.items = toGeminiSchema(v);
+      else if (k === 'enum') { if (!v.includes('')) out.enum = v; } // Gemini rejects "" in enums: leave such fields free text
+      else out[k] = v;
+    }
+    if (s.properties && s.required) out.propertyOrdering = s.required;
+    return out;
+  }
+
+  const rest = new Map(); // key -> time it may be used again after hitting its free limit
+
+  async function gemini(part, categories, onProgress) {
+    const keys = cfg.geminiKeys.filter((k) => !(rest.get(k) > Date.now()));
+    if (!keys.length) throw Object.assign(new Error('All Gemini keys have reached their free limit for now.'), { quota: true });
+    const body = {
+      systemInstruction: { parts: [{ text: instructions(categories) }] },
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: part.mime, data: part.data } }, { text: 'Read this document and return the entries.' }] }],
+      generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema(categories)), temperature: 0 },
+    };
+    let lastErr;
+    for (const [ki, key] of keys.entries()) {
+      for (const model of GEMINI_MODELS) {
+        onProgress && onProgress('Gemini is reading' + (keys.length > 1 ? ' (key ' + (ki + 1) + ')' : '') + '…');
+        let res;
+        try {
+          res = await fetch(GEMINI + '/models/' + model + ':generateContent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+            body: JSON.stringify(body),
+          });
+        } catch (e) { throw new Error('Couldn\'t reach Gemini. Check your internet connection.'); }
+        if (res.ok) {
+          const j = await res.json();
+          const cand = (j.candidates || [])[0];
+          const text = ((cand && cand.content && cand.content.parts) || []).map((p) => p.text || '').join('');
+          if (!text) { lastErr = new Error('Gemini returned nothing for this file' + (cand && cand.finishReason ? ' (' + cand.finishReason + ')' : '') + '.'); continue; }
+          return Object.assign(JSON.parse(text), { by: 'Gemini' });
+        }
+        const msg = await res.text().catch(() => '');
+        if (res.status === 404) { lastErr = new Error('Gemini model not available: ' + model); continue; }          // retired: try the next model
+        if (res.status === 429) { rest.set(key, Date.now() + 10 * 60 * 1000); lastErr = Object.assign(new Error('Gemini free limit reached.'), { quota: true }); break; } // next key
+        if (res.status === 400 && /API key not valid|API_KEY_INVALID/i.test(msg)) { lastErr = new Error('A Gemini key was rejected — check it in Settings.'); break; }
+        if (res.status === 403) { lastErr = new Error('This Gemini key isn\'t allowed to use the API. Create a new key in Google AI Studio.'); break; }
+        if (res.status >= 500) { lastErr = new Error('Gemini is busy right now.'); continue; }
+        throw new Error('Gemini couldn\'t read this file (' + res.status + '). ' + msg.slice(0, 160));
+      }
+    }
+    throw lastErr || new Error('Gemini couldn\'t read this file.');
+  }
+
+  /* ---------- Claude (official Anthropic SDK) -------------------------- */
+
+  let sdkLoading = null;
+  function loadSDK() {
+    if (api._sdk) return Promise.resolve(api._sdk); // tests can inject the SDK
+    if (!sdkLoading) sdkLoading = import(ANTHROPIC_SDK).then((m) => m.default || m.Anthropic).catch((e) => { sdkLoading = null; throw new Error('Couldn\'t load the Claude library. Check your internet connection.'); });
+    return sdkLoading;
+  }
+
+  async function claude(part, categories, onProgress) {
+    const Anthropic = await loadSDK();
+    // Browser use is intentional: a personal app; the key never leaves this phone except to Anthropic.
+    const client = new Anthropic({ apiKey: cfg.claudeKey, dangerouslyAllowBrowser: true });
+    const source = part.mime === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: part.data } }
+      : { type: 'image', source: { type: 'base64', media_type: part.mime, data: part.data } };
+    onProgress && onProgress('Claude is reading…');
+    try {
+      const stream = client.beta.messages.stream({
+        model: CLAUDE_MODEL,
+        max_tokens: 16000,
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default', // if this model declines, the API retries on Anthropic's recommended fallback
+        output_config: { effort: part.mime === 'application/pdf' ? 'medium' : 'low', format: { type: 'json_schema', schema: schema(categories) } },
+        system: instructions(categories),
+        messages: [{ role: 'user', content: [source, { type: 'text', text: 'Read this document and return the entries.' }] }],
+      });
+      const msg = await stream.finalMessage();
+      if (msg.stop_reason === 'refusal') throw new Error('Claude declined to read this file.');
+      if (msg.stop_reason === 'max_tokens') throw new Error('This file has too many transactions for one go. Download a shorter date range.');
+      const text = msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+      return Object.assign(JSON.parse(text), { by: 'Claude' });
+    } catch (e) {
+      throw new Error(explainClaude(e, Anthropic));
+    }
+  }
+
+  function explainClaude(e, A) {
+    if (A && A.AuthenticationError && e instanceof A.AuthenticationError) return 'Your Claude key was rejected. Check it in Settings.';
+    if (A && A.PermissionDeniedError && e instanceof A.PermissionDeniedError) return 'This Claude key can\'t use that model. Check your Anthropic Console.';
+    if (A && A.RateLimitError && e instanceof A.RateLimitError) return 'Too many Claude requests right now — wait a minute and try again.';
+    if (A && A.BadRequestError && e instanceof A.BadRequestError) {
+      return /credit|balance/i.test(e.message || '') ? 'Your Anthropic account is out of credits.' : 'Claude couldn\'t read this file: ' + (e.message || '');
+    }
+    if (A && A.APIConnectionError && e instanceof A.APIConnectionError) return 'Couldn\'t reach Claude. Check your internet connection.';
+    if (e instanceof SyntaxError) return 'Claude\'s reply was incomplete. Please try again.';
+    return (e && e.message) || String(e);
+  }
+
+  /* ---------- Main entry ---------------------------------------------- */
+
+  /**
+   * Read a bill photo or PDF. Tries Gemini (free) first, then Claude.
+   * Resolves { kind, gstin, entries: [...], by }.
+   */
+  async function read(file, categories, onProgress) {
+    if (!hasKey()) throw new Error('Add a free Gemini key in Settings → AI bill reading.');
+    const part = await toPart(file);
+    const errors = [];
+    if (cfg.geminiKeys.length) {
+      try { return tidy(await gemini(part, categories, onProgress), categories); }
+      catch (e) { errors.push(e.message); if (!cfg.claudeKey) throw e; }
+    }
+    if (cfg.claudeKey) {
+      try { return tidy(await claude(part, categories, onProgress), categories); }
+      catch (e) { errors.push(e.message); }
+    }
+    throw new Error(errors.join(' · '));
+  }
+
+  /** Make sure every entry is usable (valid date, positive amount, known category). */
+  function tidy(r, categories) {
+    const today = new Date();
+    const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const entries = (Array.isArray(r.entries) ? r.entries : []).map((e) => ({
+      date: /^\d{4}-\d{2}-\d{2}$/.test(e.date || '') && !isNaN(new Date(e.date)) ? e.date : iso(today),
+      amount: Math.round(Math.abs(Number(e.amount) || 0) * 100) / 100,
+      direction: e.direction === 'in' ? 'in' : 'out',
+      merchant: String(e.merchant || '').trim().slice(0, 60),
+      description: String(e.description || '').trim().slice(0, 80),
+      category: categories.includes(e.category) ? e.category : (e.direction === 'in' ? 'Other income' : 'Other'),
+      mode: ['UPI', 'Card', 'Cash', 'Bank'].includes(e.mode) ? e.mode : '',
+      gst: Math.round((Number(e.gst) || 0) * 100) / 100,
+    })).filter((e) => e.amount > 0);
+    return { kind: r.kind || (entries.length > 1 ? 'statement' : 'bill'), gstin: String(r.gstin || '').trim(), entries, by: r.by };
+  }
+
+  /** Quick check that a Gemini key works (lists models). */
+  async function testGeminiKey(key) {
+    try {
+      const res = await fetch(GEMINI + '/models?pageSize=1', { headers: { 'x-goog-api-key': clean(key) } });
+      if (res.ok) return { ok: true, message: 'Key works ✓' };
+      if (res.status === 429) return { ok: true, message: 'Key works (free limit reached for now)' };
+      return { ok: false, message: 'Google rejected this key (' + res.status + ').' };
+    } catch (e) { return { ok: true, message: 'Saved — couldn\'t test it now (no internet?).' }; }
+  }
+
+  const api = {
+    read, hasKey, isOn, addGeminiKey, removeGeminiKey, setClaudeKey, setEnabled, testGeminiKey, masked,
+    geminiKeys: () => cfg.geminiKeys.slice(), claudeKey: () => cfg.claudeKey, enabled: () => cfg.enabled,
+    _schema: schema, _toGeminiSchema: toGeminiSchema, _tidy: tidy, _reload: () => { cfg = load(); }, _sdk: null,
+  };
+  root.AI = api;
+})(self);

@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.6.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -224,19 +224,83 @@
   const scanSheet = $('#scan-sheet');
   $('#btn-scan').addEventListener('click', () => {
     $('#scan-choose').hidden = false; $('#scan-tip').hidden = false; $('#scan-progress').hidden = true;
+    $('#scan-ai').innerHTML = AI.isOn() ? '🤖 <b>AI reading is on</b> — photos and PDFs are read by ' + (AI.geminiKeys().length ? 'Gemini' : 'Claude') + '.'
+      : '📱 Photos are read on this phone. <a href="#settings" id="scan-ai-link">Add a free AI key</a> for better accuracy and PDFs.';
     scanSheet.showModal();
   });
   $('#scan-camera').addEventListener('click', () => $('#file-camera').click());
   $('#scan-gallery').addEventListener('click', () => $('#file-gallery').click());
-  ['#file-camera', '#file-gallery'].forEach((id) => $(id).addEventListener('change', async (e) => {
+  $('#scan-pdf').addEventListener('click', () => {
+    if (!AI.isOn()) { scanSheet.close(); go('settings'); setTimeout(() => $('#ai-card').scrollIntoView({ behavior: 'smooth' }), 250); toast('PDFs need a free Gemini key — add one here (2 minutes).'); return; }
+    $('#file-pdf').click();
+  });
+  document.addEventListener('click', (e) => { if (e.target.id === 'scan-ai-link') { scanSheet.close(); setTimeout(() => $('#ai-card').scrollIntoView({ behavior: 'smooth' }), 250); } });
+
+  /** Every category name the AI may choose from. */
+  const aiCategories = () => [...Object.keys(Parser.EXPENSE_CATEGORIES), ...Object.keys(Parser.INCOME_CATEGORIES)];
+
+  /** A category you taught Kaasu for this shop/payee wins over the AI's guess. */
+  function learnedFor(name) {
+    const learned = Store.get().learned || {};
+    const n = ' ' + String(name || '').toLowerCase() + ' ';
+    const hit = Object.keys(learned).sort((a, b) => b.length - a.length).find((p) => p && n.includes(' ' + p + ' '));
+    return hit ? learned[hit] : null;
+  }
+
+  /** AI result entry -> Kaasu record. */
+  function fromAI(e, by) {
+    const L = learnedFor(e.merchant) || learnedFor(e.description);
+    let type = e.direction === 'in' ? 'income' : 'expense';
+    let category = e.category;
+    if (L) { type = L.type || type; category = L.category; }
+    if (type === 'expense' && !Parser.EXPENSE_CATEGORIES[category]) category = 'Other';
+    if (type === 'income' && !Parser.INCOME_CATEGORIES[category]) category = 'Other income';
+    return { type, amount: e.amount, category, note: e.merchant || e.description || category, date: e.date, mode: e.mode, source: 'bill', raw: [e.merchant, e.description].filter(Boolean).join(' — ') + (by ? ' [' + by + ']' : '') };
+  }
+
+  /** Same day, same amount, same direction already in Kaasu -> probably a duplicate. */
+  function looksDuplicate(rec) {
+    return Store.active().some((t) => t.date === rec.date && Math.abs(t.amount - rec.amount) < 0.5 && (INFLOW.has(t.type) === (rec.type === 'income')));
+  }
+
+  ['#file-camera', '#file-gallery', '#file-pdf'].forEach((id) => $(id).addEventListener('change', async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file) return;
     if (!scanSheet.open) scanSheet.showModal();
     $('#scan-choose').hidden = true; $('#scan-tip').hidden = true; $('#scan-progress').hidden = false;
+    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
     const url = URL.createObjectURL(file);
-    $('#scan-preview').src = url;
+    $('#scan-preview').hidden = isPdf;
+    if (!isPdf) $('#scan-preview').src = url;
     const fill = $('#scan-fill'), msg = $('#scan-msg');
+    // 1) AI reading, when a key is set up
+    if (AI.isOn()) {
+      let tick = 5; fill.style.width = '5%';
+      const timer = setInterval(() => { tick = Math.min(92, tick + (92 - tick) * 0.08); fill.style.width = tick + '%'; }, 400);
+      try {
+        const r = await AI.read(file, aiCategories(), (m) => { msg.textContent = m; });
+        clearInterval(timer); fill.style.width = '100%';
+        URL.revokeObjectURL(url);
+        scanSheet.close();
+        if (!r.entries.length) { toast('No amounts found in this ' + (isPdf ? 'PDF' : 'photo') + '.'); return; }
+        if (r.entries.length === 1 && r.kind !== 'statement') {
+          const e1 = r.entries[0];
+          const rec = fromAI(e1, r.by);
+          openSheet({ mode: 'new', rec, bill: { amount: rec.amount, gst: e1.gst, gstin: r.gstin, merchant: e1.merchant, text: (e1.description || '') + '\n\nRead by ' + r.by, by: r.by } });
+        } else {
+          openImport(r.entries.map((x) => fromAI(x, r.by)), r.by, isPdf);
+        }
+        return;
+      } catch (err) {
+        clearInterval(timer);
+        if (isPdf) { msg.textContent = err.message; $('#scan-choose').hidden = false; URL.revokeObjectURL(url); return; }
+        toast('AI couldn\'t read it (' + err.message + ') — reading on the phone instead.');
+        fill.style.width = '0%';
+      }
+    }
+    if (isPdf) { msg.textContent = 'PDFs need an AI key (Settings → AI bill reading).'; $('#scan-choose').hidden = false; URL.revokeObjectURL(url); return; }
+    // 2) On-phone reading (no key, or AI failed)
     try {
       const text = await OCR.readBill(file, (p, m) => { fill.style.width = Math.round(p * 100) + '%'; msg.textContent = m; });
       const bill = Parser.parseBill(text, { learned: Store.get().learned });
@@ -251,6 +315,84 @@
       $('#scan-choose').hidden = false;
     } finally { URL.revokeObjectURL(url); }
   }));
+
+  /* ---------- Review many entries (statement PDFs) --------------------- */
+  let impRows = [];
+  function openImport(recs, by, isPdf) {
+    impRows = recs.map((r) => ({ rec: r, dup: looksDuplicate(r) })).map((x) => Object.assign(x, { on: !x.dup }));
+    const dups = impRows.filter((x) => x.dup).length;
+    $('#imp-title').textContent = 'Check ' + impRows.length + ' entries';
+    $('#imp-sub').textContent = (isPdf ? 'Read from your PDF' : 'Read from your photo') + ' by ' + by + '. Untick anything you don\'t want, fix categories if needed.' + (dups ? ' ' + (dups === 1 ? '1 looks like an entry you already have, so it\'s' : dups + ' look like entries you already have, so they\'re') + ' unticked.' : '');
+    renderImport();
+    $('#import-sheet').showModal();
+  }
+  function renderImport() {
+    $('#imp-list').innerHTML = impRows.map((x, i) => {
+      const r = x.rec, inflow = r.type === 'income';
+      const cats = Object.keys(Parser.categoriesFor(r.type));
+      return `<label class="imp-row ${x.dup ? 'dup' : ''}">
+        <input type="checkbox" data-i="${i}" ${x.on ? 'checked' : ''}>
+        <span class="what"><b>${esc(r.note)}</b><span>${niceDate(r.date)}${r.mode ? ' · ' + esc(r.mode) : ''}${x.dup ? ' · already added?' : ''}</span></span>
+        <select data-cat="${i}">${cats.map((c) => `<option ${c === r.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(r.amount)}</span>
+      </label>`;
+    }).join('');
+    const n = impRows.filter((x) => x.on).length;
+    $('#imp-add').textContent = n ? 'Add ' + n + ' ' + (n === 1 ? 'entry' : 'entries') : 'Nothing ticked';
+    $('#imp-add').disabled = !n;
+  }
+  $('#imp-list').addEventListener('change', (e) => {
+    if (e.target.dataset.i != null) impRows[+e.target.dataset.i].on = e.target.checked;
+    if (e.target.dataset.cat != null) {
+      const x = impRows[+e.target.dataset.cat];
+      if (x.rec.category !== e.target.value) Store.learn(x.rec.note, x.rec.type, e.target.value); // remember for next time
+      x.rec.category = e.target.value;
+    }
+    renderImport();
+  });
+  $('#imp-all').addEventListener('click', () => { impRows.forEach((x) => { x.on = true; }); renderImport(); });
+  $('#imp-none').addEventListener('click', () => { impRows.forEach((x) => { x.on = false; }); renderImport(); });
+  $('#imp-add').addEventListener('click', () => {
+    const recs = impRows.filter((x) => x.on).map((x) => x.rec);
+    if (!recs.length) return;
+    const added = Store.addMany(recs);
+    $('#import-sheet').close();
+    toast('Added ' + added.length + ' entries', 'Undo', () => { added.forEach((t) => Store.remove(t.id)); toast('Removed'); });
+  });
+
+  /* ---------- Settings: AI keys ------------------------------------------ */
+  function renderAI() {
+    const keys = AI.geminiKeys();
+    $('#ai-on').checked = AI.enabled();
+    $('#ai-gemini-list').innerHTML = keys.map((k, i) => `<li><span>🔑</span><code>Key ${i + 1}: ${esc(AI.masked(k))}</code><span class="key-st" data-st="${i}"></span><button class="icon-btn sm" data-rm="${i}" aria-label="Remove key ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></li>`).join('');
+    $('#ai-claude').value = '';
+    $('#ai-claude').placeholder = AI.claudeKey() ? 'Saved: ' + AI.masked(AI.claudeKey()) + ' (paste to replace, Save empty to remove)' : 'sk-ant-…';
+    $('#ai-status').textContent = !AI.hasKey() ? 'No AI key yet — bills are read on the phone, PDFs need a key.'
+      : !AI.enabled() ? 'AI reading is switched off.'
+      : '✅ AI reading is on: ' + [keys.length ? keys.length + ' Gemini key' + (keys.length > 1 ? 's' : '') : '', AI.claudeKey() ? 'Claude' : ''].filter(Boolean).join(' + ') + '. When AI is used, the photo or PDF is sent to that service to be read.';
+  }
+  $('#ai-on').addEventListener('change', (e) => { AI.setEnabled(e.target.checked); renderAI(); });
+  $('#ai-gemini-add').addEventListener('click', async () => {
+    const v = $('#ai-gemini-new').value;
+    try { AI.addGeminiKey(v); } catch (err) { toast(err.message); return; }
+    $('#ai-gemini-new').value = '';
+    renderAI();
+    const i = AI.geminiKeys().length - 1;
+    const st = $('[data-st="' + i + '"]'); if (st) st.textContent = 'checking…';
+    const r = await AI.testGeminiKey(v);
+    const st2 = $('[data-st="' + i + '"]');
+    if (st2) { st2.textContent = r.message; st2.className = 'key-st ' + (r.ok ? 'ok' : 'bad'); }
+    toast(r.ok ? 'Gemini key added ✓' : r.message);
+  });
+  $('#ai-gemini-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rm]'); if (!b) return;
+    if (!confirm('Remove this Gemini key from this phone?')) return;
+    AI.removeGeminiKey(+b.dataset.rm); renderAI();
+  });
+  $('#ai-claude-save').addEventListener('click', () => {
+    try { AI.setClaudeKey($('#ai-claude').value); } catch (err) { toast(err.message); return; }
+    toast(AI.claudeKey() ? 'Claude key saved ✓' : 'Claude key removed'); renderAI();
+  });
 
   /* =====================================================================
    * EDIT / ADD SHEET
@@ -314,6 +456,7 @@
       bits.push(b.amount != null ? '✅ Found total <b>' + inr(b.amount) + '</b>' : '⚠️ Couldn\'t find the total — please type the amount.');
       if (b.gst) bits.push('GST in this bill: <b>' + inr(b.gst) + '</b>');
       if (b.gstin) bits.push('GSTIN: ' + esc(b.gstin));
+      if (b.by) bits.push('<span class="muted">🤖 Read by ' + esc(b.by) + ' — check before saving</span>');
       $('#bill-info').innerHTML = bits.join('<br>');
       $('#ocr-text').textContent = b.text || '';
       if (b.gst && !r.note.includes('GST')) $('#f-note').value = (r.note || 'Bill');
@@ -853,6 +996,7 @@
         '<br><span class="muted">Client ID …' + esc(Drive.clientId().split('.')[0].slice(-6)) + ' — must be the same on all your phones.</span>';
     renderRules();
     renderPlanSettings();
+    renderAI();
     $('#budget').value = Store.get().settings.budget || '';
     $('#theme').value = localStorage.getItem(THEME_KEY) || '';
     const learned = Object.entries(Store.get().learned);

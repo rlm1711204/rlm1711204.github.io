@@ -159,6 +159,20 @@ You can also add a name to any expense: open the entry and fill in **Spent on (o
 
 Without the word "gift", `gave manoj 500` is still treated as a **loan** and appears on the **People** tab, where you can record repayments.
 
+### 🤖 AI bill reading (optional, free with Gemini)
+Add an AI key in **Settings → AI bill reading**, the same way as in the SSC Vocab Vault app:
+
+- **Google Gemini (free):** open **aistudio.google.com/apikey** → **Create API key** → paste it in Kaasu → **Add**. No card needed. Add a key from a second Gmail too, and Kaasu switches to it automatically when the first reaches its free daily limit.
+- **Claude (optional, paid):** a key from **console.anthropic.com**. Used only when Gemini can't read a file.
+
+With a key:
+- **Photos of bills** are read far more accurately: shop, total, date, items, category, payment mode and GST.
+- **📄 PDF** (new button on the scan screen):
+  - **A PDF bill or invoice** (Swiggy, Amazon, electricity…) opens the usual check screen.
+  - **A statement** (PhonePe, Paytm, bank) shows **every transaction in a list**. Untick anything you don't want, fix a category with the drop-down (Kaasu remembers it), then tap **Add**. Entries you already typed (same day, same amount) are unticked, so nothing is counted twice.
+
+**Privacy:** keys are stored only on that phone. They're never synced to Google Drive or included in backups. When AI is used, the photo or PDF is sent to Google (Gemini) or Anthropic (Claude) to be read. Without a key, photos are read on the phone as before.
+
 ### Scanning a bill 📷
 1. Tap the scan button → **Take photo** (or **Choose from gallery**).
 2. Kaasu reads the bill on your phone and fills in the **total**, **date**, **shop name** and **category**. It also shows the **GST** amount and the shop's **GSTIN**.
