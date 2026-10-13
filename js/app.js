@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.6.0';
+  const APP_VERSION = '1.7.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -224,6 +224,7 @@
   const scanSheet = $('#scan-sheet');
   $('#btn-scan').addEventListener('click', () => {
     $('#scan-choose').hidden = false; $('#scan-tip').hidden = false; $('#scan-progress').hidden = true;
+    fillKeyPick($('#scan-key'), $('#scan-key-wrap'));
     $('#scan-ai').innerHTML = AI.isOn() ? '🤖 <b>AI reading is on</b> — photos and PDFs are read by ' + (AI.geminiKeys().length ? 'Gemini' : 'Claude') + '.'
       : '📱 Photos are read on this phone. <a href="#settings" id="scan-ai-link">Add a free AI key</a> for better accuracy and PDFs.';
     scanSheet.showModal();
@@ -255,7 +256,16 @@
     if (L) { type = L.type || type; category = L.category; }
     if (type === 'expense' && !Parser.EXPENSE_CATEGORIES[category]) category = 'Other';
     if (type === 'income' && !Parser.INCOME_CATEGORIES[category]) category = 'Other income';
-    return { type, amount: e.amount, category, note: e.merchant || e.description || category, date: e.date, mode: e.mode, source: 'bill', raw: [e.merchant, e.description].filter(Boolean).join(' — ') + (by ? ' [' + by + ']' : '') };
+    return { type, amount: e.amount, category, note: e.merchant || e.description || category, date: e.date, mode: e.mode, source: 'bill',
+      bucket: type === 'expense' && !L ? (e.head || '') : '', raw: [e.merchant, e.description].filter(Boolean).join(' — ') + (by ? ' [' + by + ']' : '') };
+  }
+
+  /** One product line of an itemised bill -> its own expense record. */
+  function itemRec(it, bill, by) {
+    const L = learnedFor(it.name);
+    const category = L && L.type === 'expense' ? L.category : (Parser.EXPENSE_CATEGORIES[it.category] ? it.category : 'Other');
+    return { type: 'expense', amount: it.amount, category, note: it.name, date: bill.date, mode: bill.mode, source: 'bill',
+      bucket: L ? '' : it.head, raw: (bill.merchant ? bill.merchant + ' — ' : '') + it.name + (it.qty > 1 ? ' ×' + it.qty : '') + (by ? ' [' + by + ']' : '') };
   }
 
   /** Same day, same amount, same direction already in Kaasu -> probably a duplicate. */
@@ -284,7 +294,11 @@
         URL.revokeObjectURL(url);
         scanSheet.close();
         if (!r.entries.length) { toast('No amounts found in this ' + (isPdf ? 'PDF' : 'photo') + '.'); return; }
-        if (r.entries.length === 1 && r.kind !== 'statement') {
+        const parts = r.kind !== 'statement' && r.entries.length === 1 ? AI.splitBill(r.entries[0]) : [];
+        if (parts.length >= 2) {
+          const bill = r.entries[0];
+          openImport(parts.map((it) => itemRec(it, bill, r.by)), r.by, isPdf, { bill, whole: fromAI(bill, r.by) });
+        } else if (r.entries.length === 1 && r.kind !== 'statement') {
           const e1 = r.entries[0];
           const rec = fromAI(e1, r.by);
           openSheet({ mode: 'new', rec, bill: { amount: rec.amount, gst: e1.gst, gstin: r.gstin, merchant: e1.merchant, text: (e1.description || '') + '\n\nRead by ' + r.by, by: r.by } });
@@ -318,29 +332,75 @@
 
   /* ---------- Review many entries (statement PDFs) --------------------- */
   let impRows = [];
-  function openImport(recs, by, isPdf) {
-    impRows = recs.map((r) => ({ rec: r, dup: looksDuplicate(r) })).map((x) => Object.assign(x, { on: !x.dup }));
-    const dups = impRows.filter((x) => x.dup).length;
-    $('#imp-title').textContent = 'Check ' + impRows.length + ' entries';
-    $('#imp-sub').textContent = (isPdf ? 'Read from your PDF' : 'Read from your photo') + ' by ' + by + '. Untick anything you don\'t want, fix categories if needed.' + (dups ? ' ' + (dups === 1 ? '1 looks like an entry you already have, so it\'s' : dups + ' look like entries you already have, so they\'re') + ' unticked.' : '');
+  let impItems = null;   // { bill, whole, itemRows } when the list came from one itemised bill
+  let impMode = 'items';
+  function openImport(recs, by, isPdf, itemised) {
+    impItems = itemised || null;
+    impMode = 'items';
+    if (impItems) {
+      // items of one bill: check the BILL against what you already have, not each item
+      // Already added? Either as one whole-bill entry, or item by item (same day, same name, same price).
+      const sameItem = (r) => Store.active().some((t) => t.date === r.date && Math.abs(t.amount - r.amount) < 0.5 && String(t.note).toLowerCase() === String(r.note).toLowerCase());
+      const itemDups = recs.map(sameItem);
+      const dup = looksDuplicate(impItems.whole) || itemDups.filter(Boolean).length >= Math.ceil(recs.length / 2);
+      impItems.itemRows = recs.map((r, i) => ({ rec: r, dup: dup || itemDups[i], on: !(dup || itemDups[i]) }));
+      impItems.wholeRow = { rec: impItems.whole, dup, on: !dup };
+      impRows = impItems.itemRows;
+      $('#imp-title').textContent = (impItems.bill.merchant || 'Bill') + ' — ' + inr(impItems.bill.amount);
+      $('#imp-sub').textContent = 'Read by ' + by + '. Each item is its own entry with a category and 🧱 Need / 🎈 Want — tap to change.' + (dup ? ' This bill looks like one you already added, so nothing is ticked.' : '');
+    } else {
+      impRows = recs.map((r) => ({ rec: r, dup: looksDuplicate(r) })).map((x) => Object.assign(x, { on: !x.dup }));
+      const dups = impRows.filter((x) => x.dup).length;
+      $('#imp-title').textContent = 'Check ' + impRows.length + ' entries';
+      $('#imp-sub').textContent = (isPdf ? 'Read from your PDF' : 'Read from your photo') + ' by ' + by + '. Untick anything you don\'t want, fix categories if needed.' + (dups ? ' ' + (dups === 1 ? '1 looks like an entry you already have, so it\'s' : dups + ' look like entries you already have, so they\'re') + ' unticked.' : '');
+    }
+    $('#imp-mode').hidden = !impItems;
+    $$('#imp-mode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === 'items'));
     renderImport();
     $('#import-sheet').showModal();
   }
+  $('#imp-mode').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mode]'); if (!b || !impItems) return;
+    impMode = b.dataset.mode;
+    impRows = impMode === 'items' ? impItems.itemRows : [impItems.wholeRow];
+    $$('#imp-mode button').forEach((x) => x.classList.toggle('on', x === b));
+    renderImport();
+  });
+  const headOfRec = (r) => (r.type === 'expense' ? (r.bucket || Store.categoryHead(r.category)) : '');
   function renderImport() {
     $('#imp-list').innerHTML = impRows.map((x, i) => {
       const r = x.rec, inflow = r.type === 'income';
       const cats = Object.keys(Parser.categoriesFor(r.type));
-      return `<label class="imp-row ${x.dup ? 'dup' : ''}">
-        <input type="checkbox" data-i="${i}" ${x.on ? 'checked' : ''}>
-        <span class="what"><b>${esc(r.note)}</b><span>${niceDate(r.date)}${r.mode ? ' · ' + esc(r.mode) : ''}${x.dup ? ' · already added?' : ''}</span></span>
-        <select data-cat="${i}">${cats.map((c) => `<option ${c === r.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-        <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(r.amount)}</span>
-      </label>`;
+      const h = headOfRec(r);
+      return `<div class="imp-row ${x.dup ? 'dup' : ''}">
+        <input type="checkbox" data-i="${i}" ${x.on ? 'checked' : ''} aria-label="Add ${esc(r.note)}">
+        <span class="what"><span class="top"><b>${esc(r.note)}</b><span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(r.amount)}</span></span>
+          <span class="meta">${niceDate(r.date)}${r.mode ? ' · ' + esc(r.mode) : ''}${x.dup ? ' · already added?' : ''}</span>
+          <span class="ctl">${h ? `<button type="button" class="head-chip ${h}" data-head="${i}">${h === 'need' ? '🧱 Need' : '🎈 Want'}</button>` : ''}
+          <select data-cat="${i}" aria-label="Category">${cats.map((c) => `<option ${c === r.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></span>
+        </span>
+      </div>`;
     }).join('');
-    const n = impRows.filter((x) => x.on).length;
+    const on = impRows.filter((x) => x.on);
+    const n = on.length;
     $('#imp-add').textContent = n ? 'Add ' + n + ' ' + (n === 1 ? 'entry' : 'entries') : 'Nothing ticked';
     $('#imp-add').disabled = !n;
+    // itemised bill: show that the items add up to the bill
+    $('#imp-total').hidden = !impItems;
+    if (impItems) {
+      const total = Math.round(on.reduce((s, x) => s + x.rec.amount, 0) * 100) / 100;
+      const bill = impItems.bill.amount;
+      const needs = on.filter((x) => headOfRec(x.rec) === 'need').reduce((s, x) => s + x.rec.amount, 0);
+      $('#imp-total').innerHTML = (Math.abs(total - bill) < 0.01 ? '✅ Adds up to the bill total <b>' + inr(bill) + '</b>' : 'Adding <b>' + inr(total) + '</b> of the bill\'s ' + inr(bill)) +
+        (n ? ' · 🧱 Needs ' + inr(Math.round(needs)) + ' · 🎈 Wants ' + inr(Math.round(total - needs)) : '');
+    }
   }
+  $('#imp-list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-head]'); if (!b) return;
+    const x = impRows[+b.dataset.head];
+    x.rec.bucket = headOfRec(x.rec) === 'need' ? 'want' : 'need';
+    renderImport();
+  });
   $('#imp-list').addEventListener('change', (e) => {
     if (e.target.dataset.i != null) impRows[+e.target.dataset.i].on = e.target.checked;
     if (e.target.dataset.cat != null) {
@@ -361,10 +421,24 @@
   });
 
   /* ---------- Settings: AI keys ------------------------------------------ */
+  /** Auto / Key 1 / Key 2 … — shown when there is more than one Gemini key. */
+  function fillKeyPick(sel, wrap) {
+    const keys = AI.geminiKeys();
+    wrap.hidden = keys.length < 2 || !AI.enabled();
+    sel.innerHTML = '<option value="0">Auto — move to the next key at the free limit</option>' +
+      keys.map((k, i) => `<option value="${i + 1}">Key ${i + 1} only (${esc(AI.masked(k))})</option>`).join('');
+    sel.value = String(AI.pickedKey());
+  }
+  ['#scan-key', '#ai-pick'].forEach((id) => $(id).addEventListener('change', (e) => {
+    AI.pickKey(+e.target.value);
+    toast(+e.target.value ? 'Using Gemini key ' + e.target.value : 'Using Auto: key 1, then the next key at its limit');
+    if (id === '#ai-pick') renderAI();
+  }));
   function renderAI() {
     const keys = AI.geminiKeys();
     $('#ai-on').checked = AI.enabled();
     $('#ai-gemini-list').innerHTML = keys.map((k, i) => `<li><span>🔑</span><code>Key ${i + 1}: ${esc(AI.masked(k))}</code><span class="key-st" data-st="${i}"></span><button class="icon-btn sm" data-rm="${i}" aria-label="Remove key ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></li>`).join('');
+    fillKeyPick($('#ai-pick'), $('#ai-pick-wrap'));
     $('#ai-claude').value = '';
     $('#ai-claude').placeholder = AI.claudeKey() ? 'Saved: ' + AI.masked(AI.claudeKey()) + ' (paste to replace, Save empty to remove)' : 'sk-ant-…';
     $('#ai-status').textContent = !AI.hasKey() ? 'No AI key yet — bills are read on the phone, PDFs need a key.'

@@ -255,6 +255,8 @@
           </ol>
         </details>
 
+        <label class="field key-pick" id="ai-pick-wrap" hidden><span>Which Gemini key to use</span><select id="ai-pick"></select></label>
+
         <div class="field"><span>Claude key (optional, paid)</span>
           <div class="key-add"><input id="ai-claude" type="password" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-claude-save">Save</button></div>
           <small class="muted">Used only if Gemini can't read a file. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</small>
@@ -442,6 +444,11 @@
       <button type="button" class="icon-btn sm" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <p class="muted small" id="imp-sub"></p>
+    <div class="seg" id="imp-mode" hidden>
+      <button type="button" data-mode="items" class="on">🧾 Split into items</button>
+      <button type="button" data-mode="whole">One entry for the bill</button>
+    </div>
+    <p class="imp-total small" id="imp-total" hidden></p>
     <div class="imp-tools"><button class="link small" id="imp-all">Tick all</button><button class="link small" id="imp-none">Untick all</button></div>
     <div id="imp-list" class="imp-list"></div>
     <div class="sheet-actions"><button type="button" class="btn primary" id="imp-add">Add</button></div>
@@ -454,6 +461,7 @@
       <button type="button" class="icon-btn sm" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <p id="scan-ai" class="scan-ai small"></p>
+    <label class="field key-pick" id="scan-key-wrap" hidden><span>Gemini key to use</span><select id="scan-key"></select></label>
     <div id="scan-choose" class="btn-grid">
       <button class="btn primary" id="scan-camera">📷 Take photo</button>
       <button class="btn" id="scan-gallery">🖼️ Choose from gallery</button>

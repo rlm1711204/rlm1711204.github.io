@@ -413,3 +413,22 @@ input, select, textarea, .field input, .field select, .toolbar input[type=search
 .imp-row .amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .imp-row .amt.in { color: var(--pos); }
 .imp-row.dup { opacity: .6; }
+
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--surface-2); border-radius: 12px; padding: 4px; margin: 6px 0 8px; }
+.seg button { border: 0; background: none; border-radius: 9px; padding: 8px 6px; font-weight: 600; font-size: 13.5px; color: var(--ink-2); }
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.imp-total { margin: 0 2px 8px; color: var(--ink-2); }
+.imp-total b { color: var(--ink); }
+.head-chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; font-size: 12px; padding: 2px 8px; font-weight: 600; white-space: nowrap; }
+.head-chip.want { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.imp-row .side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.imp-row .side .ctl { display: flex; gap: 4px; align-items: center; }
+.key-pick { margin: 0 0 10px; }
+
+.imp-row { align-items: flex-start; }
+.imp-row input[type=checkbox] { margin-top: 2px; }
+.imp-row .what .top { display: flex; gap: 8px; align-items: baseline; }
+.imp-row .what .top b { flex: 1; white-space: normal; overflow: visible; line-height: 1.3; }
+.imp-row .what .meta { display: block; font-size: 12.5px; color: var(--ink-2); }
+.imp-row .what .ctl { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.imp-row .what .ctl select { max-width: 160px; }

@@ -171,6 +171,15 @@ With a key:
   - **A PDF bill or invoice** (Swiggy, Amazon, electricity…) opens the usual check screen.
   - **A statement** (PhonePe, Paytm, bank) shows **every transaction in a list**. Untick anything you don't want, fix a category with the drop-down (Kaasu remembers it), then tap **Add**. Entries you already typed (same day, same amount) are unticked, so nothing is counted twice.
 
+**Itemised bills** (Instamart, Blinkit, Zepto, BigBasket, supermarket bills) become **one entry per item**:
+- Each item gets its name, price, category and **🧱 Need / 🎈 Want**. Tap the chip to switch it, or the drop-down to change the category.
+- Unavailable or struck-out items are skipped.
+- Delivery/handling fees, discounts and round-off go into one **"Delivery & fees"** line, so the items add up **exactly** to the bill's Grand Total. The screen shows ✅ when they match, plus the Needs/Wants split.
+- Prefer one entry? Tap **One entry for the bill**.
+- Scanning the same bill twice is caught: items already saved are unticked.
+
+**Two Gemini keys?** Choose **Auto** (Key 1, then Key 2 when Key 1 reaches its free limit), **Key 1 only** or **Key 2 only**, on the scan screen or in Settings.
+
 **Privacy:** keys are stored only on that phone. They're never synced to Google Drive or included in backups. When AI is used, the photo or PDF is sent to Google (Gemini) or Anthropic (Claude) to be read. Without a key, photos are read on the phone as before.
 
 ### Scanning a bill 📷

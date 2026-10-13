@@ -25,8 +25,9 @@
   /* ---------- Settings (this phone only) ------------------------------- */
 
   function load() {
-    try { return Object.assign({ geminiKeys: [], claudeKey: '', enabled: true }, JSON.parse(localStorage.getItem(KEY) || '{}')); }
-    catch (e) { return { geminiKeys: [], claudeKey: '', enabled: true }; }
+    const base = { geminiKeys: [], claudeKey: '', enabled: true, keyPick: '' }; // keyPick '' = Auto, else that key
+    try { return Object.assign(base, JSON.parse(localStorage.getItem(KEY) || '{}')); }
+    catch (e) { return base; }
   }
   let cfg = load();
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) { /* storage full / private mode */ } };
@@ -38,7 +39,14 @@
     if (!cfg.geminiKeys.includes(k)) cfg.geminiKeys.push(k);
     save();
   }
-  function removeGeminiKey(i) { cfg.geminiKeys.splice(i, 1); save(); }
+  function removeGeminiKey(i) {
+    const [gone] = cfg.geminiKeys.splice(i, 1);
+    if (gone && cfg.keyPick === gone) cfg.keyPick = '';
+    save();
+  }
+  /** Which Gemini key to use: 0 = Auto (move on to the next key at the free limit), 1 = Key 1, 2 = Key 2… */
+  function pickKey(n) { cfg.keyPick = n > 0 && cfg.geminiKeys[n - 1] ? cfg.geminiKeys[n - 1] : ''; save(); }
+  const pickedKey = () => (cfg.keyPick && cfg.geminiKeys.includes(cfg.keyPick) ? cfg.geminiKeys.indexOf(cfg.keyPick) + 1 : 0);
   function setClaudeKey(k) {
     k = clean(k);
     if (k && !/^sk-ant-\S{20,}$/.test(k)) throw new Error('A Claude key starts with "sk-ant-". Copy the whole key from the Anthropic Console.');
@@ -68,7 +76,7 @@
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['date', 'amount', 'direction', 'merchant', 'description', 'category', 'mode', 'gst'],
+            required: ['date', 'amount', 'direction', 'merchant', 'description', 'category', 'head', 'mode', 'gst', 'items'],
             properties: {
               date: { type: 'string', description: 'YYYY-MM-DD. Indian documents write dates day-first (05/09/2026 = 5 September 2026).' },
               amount: { type: 'number', description: 'Rupees, positive. For a bill: the final amount paid (grand total / net payable), not the subtotal.' },
@@ -77,7 +85,24 @@
               description: { type: 'string', description: 'Short note: main items bought or what the transaction was (max 60 characters).' },
               category: { type: 'string', enum: categories, description: 'Best matching category.' },
               mode: { type: 'string', enum: ['UPI', 'Card', 'Cash', 'Bank', ''], description: 'How it was paid, if shown.' },
+              head: { type: 'string', enum: ['need', 'want'], description: 'Budget head for an out entry: need = essentials (groceries, staples, milk, vegetables, fruit, medicine, rent, bills, fuel, transport, household cleaning, education); want = non-essentials (eating out, snacks, sweets, treats, entertainment, shopping for pleasure). For in entries use need.' },
               gst: { type: 'number', description: 'Total GST (CGST+SGST+IGST) on a bill, else 0.' },
+              items: {
+                type: 'array',
+                description: 'For a bill that lists separate products (grocery/quick-commerce orders, supermarket bills): one item per product line. Leave EMPTY for statements and for bills with a single item or no item list.',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['name', 'qty', 'amount', 'category', 'head'],
+                  properties: {
+                    name: { type: 'string', description: 'Clean, short product name without quantity prefix or pack-size noise, e.g. "Daily Apple", "Peeled Garlic", "India Gate Basmati Rice", "Full Cream Milk".' },
+                    qty: { type: 'number', description: 'Quantity bought (1 if not shown).' },
+                    amount: { type: 'number', description: 'Price paid for this line in rupees (qty × unit price, after any per-item discount).' },
+                    category: { type: 'string', enum: categories, description: 'Best matching category for this product.' },
+                    head: { type: 'string', enum: ['need', 'want'], description: 'need = essential (staples, fruit, vegetables, milk, bread, eggs, cleaning supplies, medicine); want = non-essential (chocolates, chips, cold drinks, ice cream, treats, luxury items).' },
+                  },
+                },
+              },
             },
           },
         },
@@ -94,6 +119,8 @@
       'Treat money sent to a person or merchant as out, money received as in. Salary, refunds, cashback and interest are in.',
       'Pick category from this list only: ' + categories.join(', ') + '.',
       'Use Indian context: a "hotel" bill is usually a restaurant (Food); kirana / supermarket = Groceries; petrol pump = Fuel; pharmacy = Health.',
+      'If a bill lists several products, also fill `items` with every product line: skip items marked unavailable, cancelled, refunded, out of stock or struck through, and do not list delivery fees, handling fees, packaging, tips or discounts as items (they are covered by the bill total).',
+      'Classify each entry and each item as need (essential) or want (non-essential).',
       'Never invent entries. If the document has no money movement, return kind "other" and no entries.',
     ].join('\n');
   }
@@ -156,8 +183,10 @@
   const rest = new Map(); // key -> time it may be used again after hitting its free limit
 
   async function gemini(part, categories, onProgress) {
-    const keys = cfg.geminiKeys.filter((k) => !(rest.get(k) > Date.now()));
-    if (!keys.length) throw Object.assign(new Error('All Gemini keys have reached their free limit for now.'), { quota: true });
+    const picked = pickedKey();
+    // A chosen key is used on its own (even after a limit, so you see Google's own message); Auto skips resting keys.
+    const keys = picked ? [cfg.keyPick] : cfg.geminiKeys.filter((k) => !(rest.get(k) > Date.now()));
+    if (!keys.length) throw Object.assign(new Error('All Gemini keys have reached their free limit for now. Try again later or add another key.'), { quota: true });
     const body = {
       systemInstruction: { parts: [{ text: instructions(categories) }] },
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: part.mime, data: part.data } }, { text: 'Read this document and return the entries.' }] }],
@@ -166,7 +195,7 @@
     let lastErr;
     for (const [ki, key] of keys.entries()) {
       for (const model of GEMINI_MODELS) {
-        onProgress && onProgress('Gemini is reading' + (keys.length > 1 ? ' (key ' + (ki + 1) + ')' : '') + '…');
+        onProgress && onProgress('Gemini is reading (key ' + (cfg.geminiKeys.indexOf(key) + 1) + ')…');
         let res;
         try {
           res = await fetch(GEMINI + '/models/' + model + ':generateContent', {
@@ -184,7 +213,7 @@
         }
         const msg = await res.text().catch(() => '');
         if (res.status === 404) { lastErr = new Error('Gemini model not available: ' + model); continue; }          // retired: try the next model
-        if (res.status === 429) { rest.set(key, Date.now() + 10 * 60 * 1000); lastErr = Object.assign(new Error('Gemini free limit reached.'), { quota: true }); break; } // next key
+        if (res.status === 429) { rest.set(key, Date.now() + 10 * 60 * 1000); lastErr = Object.assign(new Error('Gemini key ' + (cfg.geminiKeys.indexOf(key) + 1) + ' has reached its free limit' + (picked ? ' — choose another key or Auto.' : '.')), { quota: true }); break; } // next key
         if (res.status === 400 && /API key not valid|API_KEY_INVALID/i.test(msg)) { lastErr = new Error('A Gemini key was rejected — check it in Settings.'); break; }
         if (res.status === 403) { lastErr = new Error('This Gemini key isn\'t allowed to use the API. Create a new key in Google AI Studio.'); break; }
         if (res.status >= 500) { lastErr = new Error('Gemini is busy right now.'); continue; }
@@ -277,8 +306,43 @@
       category: categories.includes(e.category) ? e.category : (e.direction === 'in' ? 'Other income' : 'Other'),
       mode: ['UPI', 'Card', 'Cash', 'Bank'].includes(e.mode) ? e.mode : '',
       gst: Math.round((Number(e.gst) || 0) * 100) / 100,
+      head: e.head === 'want' ? 'want' : 'need',
+      items: (Array.isArray(e.items) ? e.items : []).map((it) => ({
+        name: String(it.name || '').replace(/^\s*\d+\s*[x×]\s*/i, '').replace(/[.…]+$/, '').trim().slice(0, 60),
+        qty: Number(it.qty) || 1,
+        amount: Math.round(Math.abs(Number(it.amount) || 0) * 100) / 100,
+        category: categories.includes(it.category) ? it.category : (categories.includes(e.category) ? e.category : 'Other'),
+        head: it.head === 'want' ? 'want' : 'need',
+      })).filter((it) => it.name && it.amount > 0),
     })).filter((e) => e.amount > 0);
     return { kind: r.kind || (entries.length > 1 ? 'statement' : 'bill'), gstin: String(r.gstin || '').trim(), entries, by: r.by };
+  }
+
+  /**
+   * Turn one itemised bill into entries that add up EXACTLY to the bill total:
+   * one per product, plus a "Delivery & fees" line for fees / round-off.
+   * If discounts are bigger than fees, item prices are reduced in proportion.
+   */
+  function splitBill(entry) {
+    const items = (entry.items || []).map((it) => Object.assign({}, it));
+    if (!items.length) return [];
+    const round = (n) => Math.round(n * 100) / 100;
+    const sum = round(items.reduce((s, it) => s + it.amount, 0));
+    let diff = round(entry.amount - sum);
+    if (diff < 0) {
+      // discount larger than fees: share it out over the items, keeping paise exact
+      const factor = entry.amount / sum;
+      let left = entry.amount;
+      items.forEach((it, i) => { it.amount = i === items.length - 1 ? round(left) : round(it.amount * factor); left = round(left - it.amount); });
+      diff = 0;
+    }
+    if (diff > 0) {
+      // fees follow the bill's most common head/category
+      const count = (k) => items.reduce((m, it) => (m[it[k]] = (m[it[k]] || 0) + it.amount, m), {});
+      const top = (m) => Object.keys(m).sort((a, b) => m[b] - m[a])[0];
+      items.push({ name: 'Delivery & fees', qty: 1, amount: diff, category: top(count('category')), head: top(count('head')), isFee: true });
+    }
+    return items;
   }
 
   /** Quick check that a Gemini key works (lists models). */
@@ -292,7 +356,7 @@
   }
 
   const api = {
-    read, hasKey, isOn, addGeminiKey, removeGeminiKey, setClaudeKey, setEnabled, testGeminiKey, masked,
+    read, splitBill, pickKey, pickedKey, hasKey, isOn, addGeminiKey, removeGeminiKey, setClaudeKey, setEnabled, testGeminiKey, masked,
     geminiKeys: () => cfg.geminiKeys.slice(), claudeKey: () => cfg.claudeKey, enabled: () => cfg.enabled,
     _schema: schema, _toGeminiSchema: toGeminiSchema, _tidy: tidy, _reload: () => { cfg = load(); }, _sdk: null,
   };
