@@ -74,17 +74,19 @@ add('expense', 1500, 'Shopping', '2026-09-13', { bucket: 'need' }); // you marke
 add('saving', 6000, 'Gold', '2026-09-15');
 const plan = Store.budgetPlan(2026, 8);
 const H = Object.fromEntries(plan.heads.map((h) => [h.key, h]));
-assert.strictEqual(plan.base, 50000);
-assert.deepStrictEqual([H.need.budget, H.want.budget, H.saving.budget], [25000, 15000, 10000]);
-assert.deepStrictEqual([H.need.used, H.want.used, H.saving.used], [21500, 4000, 6000]);
-assert.deepStrictEqual([H.need.left, H.want.left, H.saving.left], [3500, 11000, 4000]);
+// money to plan with = Sept income 50000 + 30000 left over from August
 assert.strictEqual(plan.carry, 30000);
+assert.strictEqual(plan.base, 80000);
+assert.deepStrictEqual([H.need.budget, H.want.budget, H.saving.budget], [40000, 24000, 16000]);
+assert.deepStrictEqual([H.need.used, H.want.used, H.saving.used], [21500, 4000, 6000]);
+assert.deepStrictEqual([H.need.left, H.want.left, H.saving.left], [18500, 20000, 10000]);
+assert.strictEqual(H.need.left + H.want.left + H.saving.left, plan.totalLeft);   // heads add up to "Money left"
 assert.strictEqual(plan.totalLeft, 30000 + (50000 - 20000 - 4000 - 1500 - 6000));
 // custom split and category override
 Store.setSetting('split', [60, 20, 20]);
 Store.setSetting('bucketMap', { Shopping: 'need' });
 const plan2 = Store.budgetPlan(2026, 8);
-assert.strictEqual(plan2.heads[0].budget, 30000);
+assert.strictEqual(plan2.heads[0].budget, 48000);                                // 60% of 80000
 assert.strictEqual(plan2.heads[0].used, 25500);
 // carry off
 Store.setSetting('carryForward', false);
@@ -131,3 +133,27 @@ assert.strictEqual(Store.gifts().length, 3 - 1);                          // all
 // gifts are ordinary expenses: they count in the month's spending
 assert.strictEqual(Store.totals('2026-10-01', '2026-10-31').expense, 30 + 30 + 60 + 80 + 80 + 1200 + 500 + 1500 + 2000);
 console.log('item & person grouping ok');
+
+
+// Ram's October: income 80,507, Sept shortfall 3,977, 4,300 given to people.
+// The three heads must add up to exactly what is left — never more.
+Store.replaceAll(Store.emptyData());
+Store.setSetting('carryForward', true);
+Store.setSetting('split', [70, 20, 10]);
+Store.add({ type: 'expense', amount: 3977, category: 'Rent', date: '2026-09-05' });          // September: overspent (no income)
+Store.add({ type: 'income', amount: 80507, category: 'Salary', date: '2026-10-01' });
+Store.add({ type: 'expense', amount: 31872, category: 'Rent', date: '2026-10-05' });         // needs
+Store.add({ type: 'expense', amount: 11372, category: 'Shopping', date: '2026-10-06' });     // wants
+Store.add({ type: 'saving', amount: 5050, category: 'SIP / Mutual fund', date: '2026-10-10' });
+Store.add({ type: 'lent', amount: 4300, person: 'Ravi', category: 'Personal loan', date: '2026-10-12' });
+const oc = Store.budgetPlan(2026, 9);
+const sumLeft = oc.heads.reduce((s, h) => s + h.left, 0);
+assert.strictEqual(oc.totalLeft, 23936);                     // the "Money left" on Home
+assert.strictEqual(oc.base, 80507 - 3977 - 4300);            // 72,230 to plan with
+assert.strictEqual(Math.round(sumLeft), 23936);              // heads add up exactly — no extra money
+assert.deepStrictEqual(oc.heads.map((h) => Math.round(h.left)), [18689, 3074, 2173]);
+// a huge shortfall: nothing to plan with, never negative budgets
+Store.add({ type: 'expense', amount: 200000, category: 'Travel', date: '2026-09-20' });
+const bad = Store.budgetPlan(2026, 9);
+assert.ok(bad.base < 0); assert.ok(bad.heads.every((h) => h.budget === 0));
+console.log('plan matches money left ok');

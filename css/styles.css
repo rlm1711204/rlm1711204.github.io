@@ -432,3 +432,11 @@ input, select, textarea, .field input, .field select, .toolbar input[type=search
 .imp-row .what .meta { display: block; font-size: 12.5px; color: var(--ink-2); }
 .imp-row .what .ctl { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
 .imp-row .what .ctl select { max-width: 160px; }
+
+/* where the money to plan with comes from */
+.plan-break { margin: -2px 0 10px; font-size: 13.5px; }
+.plan-break summary { color: var(--ink-2); cursor: pointer; }
+.plan-break summary b { color: var(--ink); }
+.pb-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pb-row.neg b { color: var(--danger); }
+.pb-row.pb-total { border-top: 1px solid var(--line); margin-top: 2px; padding-top: 6px; color: var(--ink); font-weight: 600; }

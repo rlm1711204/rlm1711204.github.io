@@ -126,7 +126,7 @@ Kaasu splits your monthly income into three heads. The default is **50 / 30 / 20
 - **One entry is different?** Add `need` or `want` when typing (`shoes 2500 need`), or open the entry and change **Budget head**.
 - **A whole category should switch?** Go to Settings → Budget plan and tap the category (e.g. make *Food* a Need).
 - **Change the split:** Settings → Budget plan → **Split**. Choose 50/30/20, 60/20/20, 70/20/10, 40/30/30, 50/20/30, or **Custom** (the three numbers must add up to 100).
-- **Plan based on:** this month's income (the default), or a fixed amount you choose. If this month's salary isn't in yet, Kaasu uses your monthly salary auto entry.
+- **Money to plan with** = this month's income (or your fixed amount) **+/−** last month's balance (left over or shortfall) **+** money taken/got back from people **−** money given/paid back. The three heads split *this* amount, so **Needs left + Wants left + Savings to go always equals your "Money left"**. You never see money you don't have. Tap *"Split of ₹… you have this month"* to see the breakdown. If this month's salary isn't in yet, your monthly salary auto entry is used.
 - **Carry forward:** the previous month's balance is carried into the next month, **whether positive or negative**. Home always shows the two parts separately, e.g. *"This month ₹66,207 − from Sept ₹35,527"*, and the budget card shows the carried line (green when money was left, red when the month was overspent). You can turn this off in Settings.
 
 ### Monthly auto entries 🔁 (rent, EMI, SIP, salary…)

@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.1';
+  const APP_VERSION = '1.8.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -689,10 +689,16 @@
     const daysIn = new Date(y, m, 0).getDate();
     const pace = isCurrent ? now.getDate() / daysIn : 1; // how far through the month we are
     let html = '';
-    if (!plan.base) {
+    if (!plan.income) {
       html += '<p class="muted small plan-base">Add your income (type <b>salary 55000</b>) or set a fixed amount in Settings to see how much you can spend under each head.</p>';
     } else {
-      html += `<p class="muted small plan-base">Based on ${esc(plan.baseSource)}: <b>${inr(Math.round(plan.base))}</b></p>`;
+      // where the money to plan with comes from: income ± last month ± people
+      const rows = plan.parts.map((p, i) => `<div class="pb-row${p.amount < 0 ? ' neg' : ''}"><span>${i ? (p.amount < 0 ? '− ' : '+ ') : ''}${esc(p.label)}</span><b>${inr(Math.abs(Math.round(p.amount)))}</b></div>`).join('');
+      const total = `<div class="pb-row pb-total"><span>Money to plan with</span><b>${inr(Math.round(plan.base))}</b></div>`;
+      html += plan.parts.length > 1 ? `<details class="plan-break"${plan.base < plan.income ? ' open' : ''}><summary>Split of <b>${inr(Math.round(plan.base))}</b> you have this month</summary>${rows}${total}</details>`
+        : `<p class="muted small plan-base">Split of this month's ${plan.baseSource === 'fixed' ? 'fixed amount' : plan.baseSource === 'expected' ? 'expected salary' : 'income'}: <b>${inr(Math.round(plan.base))}</b></p>`;
+      if (plan.base <= 0) html += '<p class="small neg-ink plan-base">Last month\'s shortfall and money given to people are more than this month\'s income — nothing is left to plan with.</p>';
+      if (plan.baseSource === 'expected') html += '<p class="muted small plan-base">Using your monthly salary entry until this month\'s salary is added.</p>';
     }
     const icons = { need: '🧱', want: '🎈', saving: '🐷' };
     for (const h of plan.heads) {
@@ -717,7 +723,13 @@
         <div class="meter"><span class="${cls}" style="width:${Math.min(100, ratio * 100)}%"></span></div>
       </div>`;
     }
-    if (plan.carry) {
+    if (plan.income) {
+      // the three heads now always add up to "Money left"
+      const leftSum = plan.heads.reduce((s, h) => s + h.left, 0);
+      const matches = Math.abs(leftSum - plan.totalLeft) < 1;
+      html += `<div class="carry-row"><span>${matches ? '✅ Needs + Wants + Savings left' : 'Needs + Wants + Savings left'}</span><b>${inr(Math.round(leftSum))}</b></div>`;
+      if (!matches && plan.baseSource === 'fixed') html += `<p class="muted small plan-base">This uses your fixed amount; your real money left is ${inr(Math.round(plan.totalLeft))}.</p>`;
+    } else if (plan.carry) {
       const short = plan.carry < 0;
       html += `<div class="carry-row"><span>${short ? '⚠️ Shortfall carried from ' : '↪️ Carried forward from '}${prevName}</span><b class="${short ? 'neg-ink' : 'pos'}">${short ? '−' : '+'}${inr(Math.abs(Math.round(plan.carry)))}</b></div>`;
     }

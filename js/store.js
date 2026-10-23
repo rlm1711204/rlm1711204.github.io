@@ -460,18 +460,34 @@
     return Math.round(carry * 100) / 100;
   }
 
-  /** The full budget picture for one month. */
+  /**
+   * The full budget picture for one month.
+   *
+   * The three heads split the money you ACTUALLY have to plan with:
+   *   income (or your fixed amount)
+   *   + money carried from last month (a shortfall is a minus)
+   *   + money taken / got back from people − money given / paid back
+   * so Needs left + Wants left + Savings to go always equals "Money left".
+   */
   function budgetPlan(y, m0) {
     const st = data.settings;
     const [from, to] = monthRange(y, m0);
     const t = totals(from, to);
-    let base = 0, baseSource = '';
-    if (st.baseMode === 'fixed' && st.baseAmount > 0) { base = +st.baseAmount; baseSource = 'fixed amount'; }
-    else if (t.income > 0) { base = t.income; baseSource = 'this month\'s income'; }
+    let income = 0, baseSource = '';
+    if (st.baseMode === 'fixed' && st.baseAmount > 0) { income = +st.baseAmount; baseSource = 'fixed'; }
+    else if (t.income > 0) { income = t.income; baseSource = 'income'; }
     else {
       const expected = rules().filter((r) => r.active && r.type === 'income').reduce((s, r) => s + r.amount, 0);
-      if (expected) { base = expected; baseSource = 'expected salary'; }
+      if (expected) { income = expected; baseSource = 'expected'; }
     }
+    const carry = carryInto(y, m0);
+    const loansNet = Math.round((t.borrowed + t.got_back - t.lent - t.paid_back) * 100) / 100;
+    const base = income ? Math.round((income + carry + loansNet) * 100) / 100 : 0;
+    const parts = income ? [
+      { label: baseSource === 'fixed' ? 'Your fixed monthly amount' : baseSource === 'expected' ? 'Expected salary (not received yet)' : 'Income this month', amount: income },
+      ...(carry ? [{ label: carry < 0 ? 'Shortfall from last month' : 'Left over from last month', amount: carry, key: 'carry' }] : []),
+      ...(loansNet ? [{ label: loansNet < 0 ? 'Given / paid back to people' : 'Taken / got back from people', amount: loansNet }] : []),
+    ] : [];
     const split = (st.split && st.split.length === 3) ? st.split : [50, 30, 20];
     const used = { need: 0, want: 0, saving: 0 };
     for (const x of active()) {
@@ -479,14 +495,16 @@
       const h = headOf(x);
       if (h) used[h] += x.amount;
     }
+    const pool = Math.max(0, base);
+    const needB = Math.round(pool * split[0] / 100), wantB = Math.round(pool * split[1] / 100);
+    const budgets = [needB, wantB, Math.round((pool - needB - wantB) * 100) / 100]; // savings takes the remainder: exact total
     const heads = HEADS.map((h, i) => {
-      const budget = Math.round(base * split[i] / 100);
+      const budget = budgets[i];
       return { key: h.key, label: h.label, pct: split[i], budget, used: Math.round(used[h.key] * 100) / 100, left: Math.round((budget - used[h.key]) * 100) / 100 };
     });
-    const carry = carryInto(y, m0);
     const first = active().map((t) => t.date).sort()[0];
     const hasEarlier = !!first && first.slice(0, 7) < ymKey(y, m0);
-    return { base, baseSource, split, heads, carry, hasEarlier, monthLeft: t.left, totalLeft: t.left + carry, month: ymKey(y, m0) };
+    return { base, baseSource, parts, income, loansNet, split, heads, carry, hasEarlier, monthLeft: t.left, totalLeft: t.left + carry, month: ymKey(y, m0) };
   }
 
   /* ---------- Export ------------------------------------------------------ */
