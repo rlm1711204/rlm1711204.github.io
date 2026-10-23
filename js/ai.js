@@ -121,20 +121,56 @@
       'Use Indian context: a "hotel" bill is usually a restaurant (Food); kirana / supermarket = Groceries; petrol pump = Fuel; pharmacy = Health.',
       'If a bill lists several products, also fill `items` with every product line: skip items marked unavailable, cancelled, refunded, out of stock or struck through, and do not list delivery fees, handling fees, packaging, tips or discounts as items (they are covered by the bill total).',
       'Classify each entry and each item as need (essential) or want (non-essential).',
+      'Item names on Indian bills are often Tamil/Hindi words in English letters or abbreviations: write the plain English name first and the bill\'s word in brackets, e.g. "Big Onion (Periya Vengayam)", "Ginger (Jinser)", "Small Onion (Chinna Vengayam)". Items sold by weight have decimal quantities such as 0.540 kg — use the Amount column as the item amount.',
       'Never invent entries. If the document has no money movement, return kind "other" and no entries.',
     ].join('\n');
   }
 
   /* ---------- Files → base64 ------------------------------------------- */
 
-  /** Photos are shrunk to ~1600px JPEG (smaller upload, same readability). PDFs are sent as they are. */
+  /** Photos are shrunk to a small JPEG (fast upload, same readability). PDFs are sent as they are. */
   async function toPart(file) {
     if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) {
       if (file.size > 20 * 1024 * 1024) throw new Error('That PDF is over 20 MB. Download a shorter date range and try again.');
       return { mime: 'application/pdf', data: await b64(file) };
     }
-    const blob = await shrink(file, 1600);
+    const blob = await smallPhoto(file);
     return { mime: 'image/jpeg', data: await b64(blob) };
+  }
+
+  /**
+   * Shrink a camera photo WITHOUT opening it at full size: createImageBitmap
+   * decodes straight to the small size, so a 50-megapixel photo never needs
+   * hundreds of MB of memory. Never sends the original if shrinking fails.
+   */
+  async function smallPhoto(file, maxSide) {
+    maxSide = maxSide || 1600;
+    let bmp = null;
+    if (typeof createImageBitmap === 'function') {
+      try {
+        // first a tiny decode just to learn the shape (portrait / landscape)
+        const probe = await createImageBitmap(file, { resizeWidth: 64, resizeQuality: 'low' });
+        const portrait = probe.height >= probe.width;
+        probe.close && probe.close();
+        bmp = await createImageBitmap(file, portrait ? { resizeHeight: maxSide, resizeQuality: 'high' } : { resizeWidth: maxSide, resizeQuality: 'high' });
+      } catch (e) { bmp = null; }
+    }
+    let out = null;
+    if (bmp) {
+      const c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      bmp.close && bmp.close();
+      out = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+      c.width = c.height = 0; // free the canvas memory now
+    } else {
+      out = await shrink(file, maxSide); // older browsers
+    }
+    if (!out || out.size > 3 * 1024 * 1024) {
+      if (file.size <= 1.5 * 1024 * 1024 && /jpe?g|png|webp/i.test(file.type)) return file; // already small
+      throw new Error('This phone couldn\'t open that photo (not enough memory). Close other apps, or take the photo again at a lower camera resolution.');
+    }
+    return out;
   }
   function b64(blob) {
     return new Promise((resolve, reject) => {
@@ -154,9 +190,9 @@
         c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        c.toBlob((b) => resolve(b || file), 'image/jpeg', 0.85);
+        c.toBlob((b) => { c.width = c.height = 0; resolve(b); }, 'image/jpeg', 0.85);
       };
-      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
       img.src = url;
     });
   }
@@ -182,7 +218,22 @@
 
   const rest = new Map(); // key -> time it may be used again after hitting its free limit
 
-  async function gemini(part, categories, onProgress) {
+  /** fetch with a time limit; also stops when you tap Stop. */
+  async function timedFetch(url, opts, ms, stop) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort('timeout'), ms);
+    const onStop = () => ac.abort('stopped');
+    if (stop) { if (stop.aborted) onStop(); else stop.addEventListener('abort', onStop); }
+    try { return await fetch(url, Object.assign({}, opts, { signal: ac.signal })); }
+    catch (e) {
+      if (stop && stop.aborted) throw Object.assign(new Error('Stopped.'), { stopped: true });
+      if (ac.signal.aborted) throw Object.assign(new Error('timed out'), { timeout: true });
+      throw e;
+    } finally { clearTimeout(timer); if (stop) stop.removeEventListener('abort', onStop); }
+  }
+  let GEMINI_TIMEOUT_MS = 60 * 1000;
+
+  async function gemini(part, categories, onProgress, stop) {
     const picked = pickedKey();
     // A chosen key is used on its own (even after a limit, so you see Google's own message); Auto skips resting keys.
     const keys = picked ? [cfg.keyPick] : cfg.geminiKeys.filter((k) => !(rest.get(k) > Date.now()));
@@ -190,20 +241,35 @@
     const body = {
       systemInstruction: { parts: [{ text: instructions(categories) }] },
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: part.mime, data: part.data } }, { text: 'Read this document and return the entries.' }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema(categories)), temperature: 0 },
+      // little "thinking" needed to read a bill — keeps replies fast
+      generationConfig: { responseMimeType: 'application/json', responseSchema: toGeminiSchema(schema(categories)), temperature: 0, thinkingConfig: { thinkingLevel: 'low' } },
     };
     let lastErr;
+    let slow = 0; // after two slow replies, stop waiting (about 2 minutes at most)
     for (const [ki, key] of keys.entries()) {
       for (const model of GEMINI_MODELS) {
         onProgress && onProgress('Gemini is reading (key ' + (cfg.geminiKeys.indexOf(key) + 1) + ')…');
         let res;
         try {
-          res = await fetch(GEMINI + '/models/' + model + ':generateContent', {
+          res = await timedFetch(GEMINI + '/models/' + model + ':generateContent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
             body: JSON.stringify(body),
-          });
-        } catch (e) { throw new Error('Couldn\'t reach Gemini. Check your internet connection.'); }
+          }, GEMINI_TIMEOUT_MS, stop);
+        } catch (e) {
+          if (e.stopped) throw e;
+          if (e.timeout) {
+            lastErr = new Error('Gemini took too long (slow internet?). Try again on Wi-Fi or a better signal.');
+            if (++slow >= 2) throw lastErr;
+            continue; // one more try on the next model
+          }
+          throw new Error('Couldn\'t reach Gemini. Check your internet connection.');
+        }
+        // An older model that doesn't know the thinking setting: ask again without it.
+        if (res.status === 400 && body.generationConfig.thinkingConfig) {
+          const msg400 = await res.clone().text().catch(() => '');
+          if (/thinking/i.test(msg400)) { delete body.generationConfig.thinkingConfig; onProgress && onProgress('Gemini is reading…'); res = await timedFetch(GEMINI + '/models/' + model + ':generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body) }, GEMINI_TIMEOUT_MS, stop); }
+        }
         if (res.ok) {
           const j = await res.json();
           const cand = (j.candidates || [])[0];
@@ -232,7 +298,7 @@
     return sdkLoading;
   }
 
-  async function claude(part, categories, onProgress) {
+  async function claude(part, categories, onProgress, stop) {
     const Anthropic = await loadSDK();
     // Browser use is intentional: a personal app; the key never leaves this phone except to Anthropic.
     const client = new Anthropic({ apiKey: cfg.claudeKey, dangerouslyAllowBrowser: true });
@@ -250,16 +316,24 @@
         system: instructions(categories),
         messages: [{ role: 'user', content: [source, { type: 'text', text: 'Read this document and return the entries.' }] }],
       });
-      const msg = await stream.finalMessage();
+      const kill = () => stream.abort();
+      const timer = setTimeout(kill, 120 * 1000);
+      if (stop) stop.addEventListener('abort', kill);
+      let msg;
+      try { msg = await stream.finalMessage(); }
+      finally { clearTimeout(timer); if (stop) stop.removeEventListener('abort', kill); }
       if (msg.stop_reason === 'refusal') throw new Error('Claude declined to read this file.');
       if (msg.stop_reason === 'max_tokens') throw new Error('This file has too many transactions for one go. Download a shorter date range.');
       const text = msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
       return Object.assign(JSON.parse(text), { by: 'Claude' });
     } catch (e) {
+      if (stop && stop.aborted) throw Object.assign(new Error('Stopped.'), { stopped: true });
+      if (A_isAbort(e)) throw new Error('Claude took too long (slow internet?).');
       throw new Error(explainClaude(e, Anthropic));
     }
   }
 
+  const A_isAbort = (e) => e && (e.name === 'AbortError' || /abort/i.test(e.constructor && e.constructor.name || '') || /aborted/i.test(e.message || ''));
   function explainClaude(e, A) {
     if (A && A.AuthenticationError && e instanceof A.AuthenticationError) return 'Your Claude key was rejected. Check it in Settings.';
     if (A && A.PermissionDeniedError && e instanceof A.PermissionDeniedError) return 'This Claude key can\'t use that model. Check your Anthropic Console.';
@@ -278,17 +352,19 @@
    * Read a bill photo or PDF. Tries Gemini (free) first, then Claude.
    * Resolves { kind, gstin, entries: [...], by }.
    */
-  async function read(file, categories, onProgress) {
+  async function read(file, categories, onProgress, stop) {
     if (!hasKey()) throw new Error('Add a free Gemini key in Settings → AI bill reading.');
+    onProgress && onProgress('Making the photo smaller…');
     const part = await toPart(file);
+    if (stop && stop.aborted) throw Object.assign(new Error('Stopped.'), { stopped: true });
     const errors = [];
     if (cfg.geminiKeys.length) {
-      try { return tidy(await gemini(part, categories, onProgress), categories); }
-      catch (e) { errors.push(e.message); if (!cfg.claudeKey) throw e; }
+      try { return tidy(await gemini(part, categories, onProgress, stop), categories); }
+      catch (e) { if (e.stopped) throw e; errors.push(e.message); if (!cfg.claudeKey) throw e; }
     }
     if (cfg.claudeKey) {
-      try { return tidy(await claude(part, categories, onProgress), categories); }
-      catch (e) { errors.push(e.message); }
+      try { return tidy(await claude(part, categories, onProgress, stop), categories); }
+      catch (e) { if (e.stopped) throw e; errors.push(e.message); }
     }
     throw new Error(errors.join(' · '));
   }
@@ -336,6 +412,12 @@
       items.forEach((it, i) => { it.amount = i === items.length - 1 ? round(left) : round(it.amount * factor); left = round(left - it.amount); });
       diff = 0;
     }
+    if (diff > 0 && diff < 1) {
+      // just a round-off (e.g. 52.64 -> 53): fold it into the biggest item
+      const big = items.reduce((a, b) => (b.amount > a.amount ? b : a));
+      big.amount = round(big.amount + diff);
+      diff = 0;
+    }
     if (diff > 0) {
       // fees follow the bill's most common head/category
       const count = (k) => items.reduce((m, it) => (m[it[k]] = (m[it[k]] || 0) + it.amount, m), {});
@@ -358,7 +440,7 @@
   const api = {
     read, splitBill, pickKey, pickedKey, hasKey, isOn, addGeminiKey, removeGeminiKey, setClaudeKey, setEnabled, testGeminiKey, masked,
     geminiKeys: () => cfg.geminiKeys.slice(), claudeKey: () => cfg.claudeKey, enabled: () => cfg.enabled,
-    _schema: schema, _toGeminiSchema: toGeminiSchema, _tidy: tidy, _reload: () => { cfg = load(); }, _sdk: null,
+    _schema: schema, _toGeminiSchema: toGeminiSchema, _tidy: tidy, _reload: () => { cfg = load(); }, _sdk: null, _setTimeout: (ms) => { GEMINI_TIMEOUT_MS = ms; },
   };
   root.AI = api;
 })(self);

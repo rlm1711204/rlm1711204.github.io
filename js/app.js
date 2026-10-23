@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.7.0';
+  const APP_VERSION = '1.7.1';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -237,6 +237,22 @@
   });
   document.addEventListener('click', (e) => { if (e.target.id === 'scan-ai-link') { scanSheet.close(); setTimeout(() => $('#ai-card').scrollIntoView({ behavior: 'smooth' }), 250); } });
 
+  let scanStop = null;
+  $('#scan-stop').addEventListener('click', () => { if (scanStop) scanStop.abort(); });
+  scanSheet.addEventListener('close', () => { if (scanStop) scanStop.abort(); }); // closing the sheet stops reading too
+
+  /** A small preview picture (never the full camera photo, which can use a lot of memory). */
+  async function smallPreview(file) {
+    try {
+      if (typeof createImageBitmap !== 'function') return null;
+      const bmp = await createImageBitmap(file, { resizeWidth: 480, resizeQuality: 'medium' });
+      const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0); bmp.close && bmp.close();
+      const b = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8));
+      return b ? URL.createObjectURL(b) : null;
+    } catch (e) { return null; }
+  }
+
   /** Every category name the AI may choose from. */
   const aiCategories = () => [...Object.keys(Parser.EXPENSE_CATEGORIES), ...Object.keys(Parser.INCOME_CATEGORIES)];
 
@@ -281,16 +297,21 @@
     $('#scan-choose').hidden = true; $('#scan-tip').hidden = true; $('#scan-progress').hidden = false;
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
     const url = URL.createObjectURL(file);
-    $('#scan-preview').hidden = isPdf;
-    if (!isPdf) $('#scan-preview').src = url;
+    $('#scan-preview').hidden = true;
+    if (!isPdf) smallPreview(file).then((u) => { if (u) { $('#scan-preview').src = u; $('#scan-preview').hidden = false; } });
     const fill = $('#scan-fill'), msg = $('#scan-msg');
     // 1) AI reading, when a key is set up
     if (AI.isOn()) {
       let tick = 5; fill.style.width = '5%';
-      const timer = setInterval(() => { tick = Math.min(92, tick + (92 - tick) * 0.08); fill.style.width = tick + '%'; }, 400);
+      const started = Date.now();
+      let status = 'Starting…';
+      const show = () => { msg.textContent = status + ' ' + Math.round((Date.now() - started) / 1000) + 's'; };
+      const timer = setInterval(() => { tick = Math.min(92, tick + (92 - tick) * 0.05); fill.style.width = tick + '%'; show(); }, 500);
+      scanStop = new AbortController();
+      $('#scan-stop').hidden = false;
       try {
-        const r = await AI.read(file, aiCategories(), (m) => { msg.textContent = m; });
-        clearInterval(timer); fill.style.width = '100%';
+        const r = await AI.read(file, aiCategories(), (m) => { status = m; show(); }, scanStop.signal);
+        clearInterval(timer); fill.style.width = '100%'; $('#scan-stop').hidden = true;
         URL.revokeObjectURL(url);
         scanSheet.close();
         if (!r.entries.length) { toast('No amounts found in this ' + (isPdf ? 'PDF' : 'photo') + '.'); return; }
@@ -307,8 +328,13 @@
         }
         return;
       } catch (err) {
-        clearInterval(timer);
-        if (isPdf) { msg.textContent = err.message; $('#scan-choose').hidden = false; URL.revokeObjectURL(url); return; }
+        clearInterval(timer); $('#scan-stop').hidden = true;
+        // Stopped, a PDF, or the photo itself couldn't be opened: don't start a second heavy attempt.
+        if (err.stopped || isPdf || /memory/i.test(err.message)) {
+          msg.textContent = err.stopped ? 'Stopped. Choose a photo or PDF again.' : err.message;
+          fill.style.width = '0%';
+          $('#scan-choose').hidden = false; URL.revokeObjectURL(url); return;
+        }
         toast('AI couldn\'t read it (' + err.message + ') — reading on the phone instead.');
         fill.style.width = '0%';
       }

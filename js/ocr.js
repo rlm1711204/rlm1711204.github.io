@@ -26,40 +26,51 @@
     return loading;
   }
 
-  /** Shrink, grey-scale and sharpen contrast — makes thermal bills much easier to read. */
-  function prepare(file) {
+  /** Open the photo already shrunk (never at full camera size), so it fits in memory. */
+  async function openSmall(file, maxW) {
+    if (typeof createImageBitmap === 'function') {
+      try {
+        const probe = await createImageBitmap(file, { resizeWidth: 64, resizeQuality: 'low' });
+        const portrait = probe.height >= probe.width;
+        probe.close && probe.close();
+        return await createImageBitmap(file, portrait ? { resizeHeight: Math.round(maxW * 1.4), resizeQuality: 'high' } : { resizeWidth: maxW, resizeQuality: 'high' });
+      } catch (e) { /* fall back below */ }
+    }
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
-      img.onload = () => {
-        const maxW = 1600;
-        const scale = Math.min(1, maxW / img.naturalWidth);
-        const w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale);
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        const g = c.getContext('2d', { willReadFrequently: true });
-        g.drawImage(img, 0, 0, w, h);
-        const px = g.getImageData(0, 0, w, h);
-        const d = px.data;
-        // grey + stretch contrast
-        let min = 255, max = 0;
-        for (let i = 0; i < d.length; i += 4) {
-          const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-          d[i] = v; if (v < min) min = v; if (v > max) max = v;
-        }
-        const range = Math.max(1, max - min);
-        for (let i = 0; i < d.length; i += 4) {
-          let v = ((d[i] - min) / range) * 255;
-          v = v < 128 ? v * 0.8 : Math.min(255, v * 1.15);
-          d[i] = d[i + 1] = d[i + 2] = v;
-        }
-        g.putImageData(px, 0, 0);
-        URL.revokeObjectURL(url);
-        resolve(c);
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not open that photo.')); };
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('This phone couldn\'t open that photo (not enough memory). Close other apps and try again.')); };
       img.src = url;
     });
+  }
+
+  /** Shrink, grey-scale and sharpen contrast — makes thermal bills much easier to read. */
+  async function prepare(file) {
+    const img = await openSmall(file, 1400);
+    const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
+    const scale = Math.min(1, 1400 / iw, 2000 / ih);
+    const w = Math.round(iw * scale), h = Math.round(ih * scale);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    if (img.close) img.close();
+    const px = g.getImageData(0, 0, w, h);
+    const d = px.data;
+    let min = 255, max = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const v = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      d[i] = v; if (v < min) min = v; if (v > max) max = v;
+    }
+    const range = Math.max(1, max - min);
+    for (let i = 0; i < d.length; i += 4) {
+      let v = ((d[i] - min) / range) * 255;
+      v = v < 128 ? v * 0.8 : Math.min(255, v * 1.15);
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    g.putImageData(px, 0, 0);
+    return c;
   }
 
   /**
@@ -80,9 +91,16 @@
         },
       });
     }
-    const { data } = await worker.recognize(canvas);
-    onProgress(1, 'Done');
-    return data.text || '';
+    try {
+      const { data } = await worker.recognize(canvas);
+      onProgress(1, 'Done');
+      return data.text || '';
+    } finally {
+      // free the reader's memory (about 100 MB) right away; it reloads from cache next time
+      canvas.width = canvas.height = 0;
+      try { await worker.terminate(); } catch (e) { /* ignore */ }
+      worker = null;
+    }
   }
 
   root.OCR = { readBill };

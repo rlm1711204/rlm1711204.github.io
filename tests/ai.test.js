@@ -45,3 +45,8 @@ assert.strictEqual(AI.pickedKey(), 0);                       // Auto
 AI.pickKey(2); assert.strictEqual(AI.pickedKey(), 2);
 AI.removeGeminiKey(1); assert.strictEqual(AI.pickedKey(), 0); // chosen key removed -> back to Auto
 console.log('ai split & key choice ok');
+
+// Round-off only (52.64 -> 53): goes into the biggest item, no separate "fees" line
+const ro = AI.splitBill({ amount: 53, items: [{ name: 'Big Onion (Periya Vengayam)', amount: 35.10, category: 'Groceries', head: 'need' }, { name: 'Ginger (Jinser)', amount: 17.54, category: 'Groceries', head: 'need' }] });
+assert.strictEqual(ro.length, 2); assert.strictEqual(ro[0].amount, 35.46); assert.strictEqual(sum(ro), 53);
+console.log('round-off ok');
