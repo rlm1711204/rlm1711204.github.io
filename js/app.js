@@ -5,12 +5,19 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.14.0';
+  const APP_VERSION = '1.15.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pad = (n) => String(n).padStart(2, '0');
+  /** Short Indian amounts for small tiles: ₹1.65 L, ₹2.1 Cr (smaller amounts in full). */
+  const inrShort = (n) => {
+    const a = Math.abs(n), sign = n < 0 ? '−' : '';
+    if (a >= 1e7) return sign + '₹' + +(a / 1e7).toFixed(2) + ' Cr';
+    if (a >= 1e5) return sign + '₹' + +(a / 1e5).toFixed(2) + ' L';
+    return inr(Math.round(n));
+  };
   const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   const todayIso = () => iso(new Date());
   const monthStart = (y, m) => iso(new Date(y, m, 1));
@@ -716,39 +723,68 @@
   /* =====================================================================
    * HOME
    * ===================================================================== */
+  /* ---------- Money left card: period (this month … 2 years) ----------- */
+  const HERO_KEY = 'kaasu.heroRange';
+  let heroN = 1;
+  try { heroN = [1, 2, 3, 6, 12, 24].includes(+localStorage.getItem(HERO_KEY)) ? +localStorage.getItem(HERO_KEY) : 1; } catch (e) { /* ignore */ }
+  function heroRange() {
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth(), n = heroN;
+    const first = new Date(y, m - n + 1, 1);
+    const label = n === 1 ? monthName(y, m)
+      : (first.getFullYear() === y ? first.toLocaleString('en-IN', { month: 'short' }) : monthName(first.getFullYear(), first.getMonth(), true)) + ' – ' + monthName(y, m, true);
+    return { n, y, m, first, from: iso(first), to: monthEnd(y, m), label };
+  }
+  /** Everything the Money left card shows, for the chosen period. */
+  function heroData() {
+    const r = heroRange();
+    const t = Store.totals(r.from, r.to);
+    const carryOn = Store.get().settings.carryForward !== false;
+    const loansNet = t.borrowed + t.got_back - t.lent - t.paid_back;
+    if (r.n === 1) {
+      const plan = Store.budgetPlan(r.y, r.m);
+      return { r, t, plan, loansNet, left: plan.totalLeft, carry: carryOn ? plan.carry : 0, before: 0, base: plan.base > 0 ? plan.base : t.income, showCarry: carryOn && !!(plan.carry || plan.hasEarlier) };
+    }
+    const before = carryOn ? Store.carryInto(r.first.getFullYear(), r.first.getMonth()) : 0;
+    return { r, t, loansNet, left: t.left, carry: 0, before, base: t.income + loansNet > 0 ? t.income + loansNet : t.income, showCarry: false };
+  }
+
   function renderHome() {
     const now = new Date();
     const y = now.getFullYear(), m = now.getMonth();
-    const t = Store.totals(monthStart(y, m), monthEnd(y, m));
     const day = now.getDate(), days = new Date(y, m + 1, 0).getDate();
-    $('#hero-month').textContent = monthName(y, m);
-    $('#hero-sub').textContent = t.expense ? 'avg ' + inr(Math.round(t.expense / day)) + '/day' : '';
-    const plan = Store.budgetPlan(y, m);
-    $('#hero-left').textContent = inr(Math.round(plan.totalLeft));
-    $('#hero-left').classList.toggle('neg', plan.totalLeft < 0);
-    // the ring: how much of this month's money is spent and saved
-    const base = plan.base > 0 ? plan.base : t.income;
-    const pctLeft = base > 0 ? Math.round((Math.max(0, plan.totalLeft) / base) * 100) : null;
+    const h = heroData(), t = h.t;
+    $('#hero-month').textContent = h.r.label;
+    $('#hero-range').value = String(h.r.n);
+    const daysSoFar = Math.max(1, Math.round((new Date(todayIso() + 'T00:00:00') - h.r.first) / 864e5) + 1);
+    $('#hero-sub').textContent = t.expense ? 'avg ' + inr(Math.round(t.expense / daysSoFar)) + '/day' : '';
+    const plan = h.r.n === 1 ? h.plan : Store.budgetPlan(y, m);
+    $('#hero-left').textContent = inr(Math.round(h.left));
+    $('#hero-left').classList.toggle('neg', h.left < 0);
+    $('.hero-nums .hero-label').textContent = h.r.n === 1 ? 'Money left' : 'Left over in ' + (h.r.n >= 12 ? h.r.n / 12 + (h.r.n === 12 ? ' year' : ' years') : h.r.n + ' months');
+    // the ring: how much of the money is spent and saved
+    const base = h.base;
+    const pctLeft = base > 0 ? Math.round((Math.max(0, h.left) / base) * 100) : null;
     $('#hero-ring').innerHTML = ring(base > 0 ? [{ frac: t.expense / base, cls: 'spent' }, { frac: t.saving / base, cls: 'saved' }] : [], 104, 11,
       pctLeft == null ? '<b>—</b>' : '<b>' + Math.min(100, pctLeft) + '%</b><small>left</small>');
     const prevName = new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'short' });
-    const showCarry = Store.get().settings.carryForward !== false && (plan.carry || plan.hasEarlier);
-    $('#hero-carry').hidden = !showCarry;
-    if (showCarry) {
+    $('#hero-carry').hidden = !(h.showCarry || h.r.n > 1);
+    if (h.showCarry) {
       const sign = plan.carry < 0 ? '−' : '+';
       $('#hero-carry').innerHTML = 'This month ' + inr(Math.round(plan.monthLeft)) + ' ' + sign +
         ' ' + prevName + ' <b class="' + (plan.carry < 0 ? 'neg-ink' : '') + '">' + inr(Math.abs(Math.round(plan.carry))) + '</b>';
+    } else if (h.r.n > 1) {
+      $('#hero-carry').innerHTML = 'about <b>' + inr(Math.round(h.left / h.r.n)) + '</b> a month';
     }
     renderPlan($('#plan-body'), plan, true);
     $('#plan-title').textContent = 'Budget plan · ' + plan.split.join('/');
     $('#plan-mini').innerHTML = miniHeads(plan, true);
-    $('#t-spent').textContent = inr(Math.round(t.expense));
-    $('#t-income').textContent = inr(Math.round(t.income));
-    $('#t-saved').textContent = inr(Math.round(t.saving));
+    $('#t-spent').textContent = inrShort(t.expense);
+    $('#t-income').textContent = inrShort(t.income);
+    $('#t-saved').textContent = inrShort(t.saving);
 
     const budget = +Store.get().settings.budget || 0;
-    $('#budget-box').hidden = !budget;
-    if (budget) {
+    $('#budget-box').hidden = !budget || h.r.n > 1;   // the spending limit is per month
+    if (budget && h.r.n === 1) {
       const used = t.expense / budget;
       const left = budget - t.expense;
       $('#budget-text').textContent = inr(Math.round(t.expense)) + ' of ' + inr(budget) + (left >= 0 ? ' · ' + inr(Math.round(left / Math.max(1, days - day + 1))) + '/day left' : ' · over by ' + inr(Math.round(-left)));
@@ -793,6 +829,62 @@
   $('#people-card').addEventListener('click', () => go('people'));
   $('#auto-card').addEventListener('click', () => { go('settings'); openCard('rules-card'); });
   $('#plan-edit').addEventListener('click', () => { go('settings'); openCard('plan-settings'); });
+
+  $('#hero-range').addEventListener('change', (e) => {
+    heroN = +e.target.value || 1;
+    try { localStorage.setItem(HERO_KEY, String(heroN)); } catch (err) { /* ignore */ }
+    renderHome();
+  });
+
+  /** Tap a figure on the Money left card: see what it is made of. */
+  const HERO_LIST = { spent: ['💸 Spent', 'expense'], income: ['💰 Income', 'income'], saved: ['🐷 Saved', 'saving'] };
+  function openHeroList(kind) {
+    const r = heroRange();
+    const [title, type] = HERO_LIST[kind];
+    const all = Store.active().filter((t) => t.type === type && t.date >= r.from && t.date <= r.to);
+    const list = visibleList(all);
+    const cats = Store.byCategory(r.from, r.to, type).slice(0, 3);
+    openGroup(title + ' · ' + r.label, '', list, {
+      hidden: all.length - list.length,
+      hint: cats.length > 1 ? 'Most: ' + cats.map((c) => esc(c.category) + ' ' + inr(Math.round(c.amount))).join(' · ') : '',
+      empty: kind === 'income' ? 'No income in this period. Type <b>salary 55000</b>.' : kind === 'saved' ? 'Nothing saved in this period. Type <b>sip 5000</b>.' : 'No spending in this period.',
+    });
+  }
+  /** Money left = income − spent − saved ± people ± last month, as a sum. */
+  function openMoneyLeft() {
+    const h = heroData(), t = h.t, r = h.r;
+    const pct = (v) => (h.base > 0 ? Math.round((v / h.base) * 100) : 0);
+    const left = Math.max(0, h.left);
+    const shares = [['spent', 'Spent', t.expense], ['saved', 'Saved', t.saving], ['left', 'Left', left]];
+    const other = h.base > 0 ? Math.max(0, h.base - t.expense - t.saving - left) : 0;
+    if (other >= 1) shares.splice(2, 0, ['other', 'Given to people', other]);
+    const bar = h.base > 0 ? `<div class="mix-bar">${shares.map(([k, , v]) => `<i class="mx-${k}" style="width:${(v / h.base) * 100}%"></i>`).join('')}</div>
+      <div class="mix-legend">${shares.map(([k, label, v]) => `<span><i class="mx-${k}"></i>${label} <b>${pct(v)}%</b></span>`).join('')}</div>` : '';
+    const prev = new Date(r.y, r.m - 1, 1).toLocaleString('en-IN', { month: 'long' });
+    const rows = [
+      ['Income', t.income, '+'], ['Spent', t.expense, '−'], ['Saved / invested', t.saving, '−'],
+      ['Given to people', t.lent, '−'], ['Taken from people', t.borrowed, '+'], ['Got back from people', t.got_back, '+'], ['Paid back to people', t.paid_back, '−'],
+    ].filter(([, v]) => v);
+    if (h.carry) rows.push([h.carry < 0 ? 'Shortfall from ' + prev : 'Left over from ' + prev, Math.abs(h.carry), h.carry < 0 ? '−' : '+']);
+    const sum = rows.map(([label, v, sign]) => `<div class="pb-row${sign === '−' ? ' neg' : ''}"><span>${sign} ${label}</span><b>${inr(Math.round(v))}</b></div>`).join('') +
+      `<div class="pb-row pb-total"><span>= ${r.n === 1 ? 'Money left' : 'Left over in this period'}</span><b>${inr(Math.round(h.left))}</b></div>`;
+    const now = r.n > 1 && h.before ? `<p class="muted small">Counting what was left before ${r.first.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}, you have <b>${inr(Math.round(h.left + h.before))}</b> now.</p>` : '';
+    personKey = null;
+    $('#ps-name').textContent = '💰 Money left · ' + r.label;
+    $('#ps-balance').innerHTML = inr(Math.round(h.left)) + (h.base > 0 ? ' <span class="muted small">· ' + pct(left) + '% of ' + inr(Math.round(h.base)) + ' still left</span>' : '');
+    $('#ps-settle').hidden = true; $('#ps-add').hidden = true;
+    $('#ps-list').innerHTML = `<div class="card mix-card">${bar}<div class="pb-sum">${sum}</div>${now}</div>`;
+    if (!$('#person-sheet').open) $('#person-sheet').showModal();
+  }
+  const heroClick = (e) => {
+    const b = e.target.closest('[data-hero]');
+    if (!b || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    if (b.dataset.hero === 'left') openMoneyLeft(); else openHeroList(b.dataset.hero);
+  };
+  $('.card.hero').addEventListener('click', heroClick);
+  $('.card.hero').addEventListener('scroll', (e) => { e.currentTarget.scrollLeft = 0; e.currentTarget.scrollTop = 0; });  // older phones without overflow: clip
+  $('.card.hero').addEventListener('keydown', heroClick);
 
   /** Folded budget plan: just what is left under each head, with a thin bar. */
   function miniHeads(plan, isCurrent) {

@@ -38,7 +38,9 @@
       <p class="muted small">Add or remove family members in Settings → Family members. Reports show how much each person spent.</p>` },
     hero: { t: '💰 Money left', b: `
       <p><b>Money left</b> = this month's income − spent − saved, plus or minus money given to or taken from people.</p>
-      <p>If <i>carry forward</i> is on, last month's balance (or shortfall) is added too. The small line shows this month and last month separately.</p>` },
+      <p>If <i>carry forward</i> is on, last month's balance (or shortfall) is added too. The small line shows this month and last month separately.</p>
+      <ul class="tips"><li><b>Tap any number</b> — Spent, Income, Saved, Money left or the % ring — to see what it is made of.</li>
+        <li>Tap the <b>month name ▾</b> to see 2 months, 3 months, 6 months, 1 year or 2 years together.</li></ul>` },
     plan: { t: '📊 Needs · Wants · Savings', b: `
       <p>Your money is split into three heads (50/30/20 by default — change it in Settings).</p>
       <ul class="tips"><li>Every expense goes to <b>Need</b> or <b>Want</b> by its category. Type <b>need</b> or <b>want</b> after an entry to choose yourself.</li>

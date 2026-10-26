@@ -889,3 +889,25 @@ body {
 .head-row[data-plan-head] { border-radius: 12px; margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
 .mh-go { font-style: normal; font-weight: 700; color: var(--accent); }
 .ps-hint { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-2); margin-top: 2px; }
+
+/* Money left card: period picker and tappable figures */
+.hero-period { position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.hero-period i { font-style: normal; font-size: 11px; opacity: .85; }
+.hero-period select { position: absolute; inset: 0; width: 100%; opacity: 0; font-size: 16px; cursor: pointer; }
+.hero [data-hero] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.hero .tile[data-hero]:active, .hero .hero-nums:active, .hero .ring:active { opacity: .78; }
+.mix-card { padding: 14px; }
+.mix-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--surface-2); }
+.mix-bar i { display: block; height: 100%; }
+.mix-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 12px; font-size: 12.5px; color: var(--ink-2); }
+.mix-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.mix-legend i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.mx-spent { background: var(--c-spend); }
+.mx-saved { background: var(--c-save); }
+.mx-left { background: var(--c-income); }
+.mx-other { background: var(--warn); }
+.pb-sum .pb-row { font-size: 14px; }
+.mix-card p { margin: 10px 0 0; }
+.card.hero { overflow: clip; }   /* never scrolls sideways when a figure is tapped */
+.hero [data-hero]:focus { outline: none; }
+.hero [data-hero]:focus-visible { outline: 2px solid rgba(255,255,255,.85); outline-offset: 2px; }
