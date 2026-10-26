@@ -106,6 +106,16 @@ My Drive/
 
 ---
 
+## New in v1.9 — family, privacy, themes, help
+
+- **Family members** — Settings → *Family members* → add Papa, Mummy… On Home, tap who spent it under the typing box (it goes back to *Self* after each add), or type `papa: medicine 200` / `petrol 500 by mummy`. Reports → *By family member* shows each person's total; History can filter by person.
+- **🔒 Private entries** — tick *Private* on an entry, tap the 🔒 chip, or type the word `private` (`gift 2000 private`). Set a PIN in Settings → *Private entries & PIN*. While locked, private entries are hidden from lists and search and show only as "Private" in reports (totals still count them). Kaasu re-locks 1 minute after you leave it; the 🔓 button at the top locks at once. *Ask for the PIN every time* locks the whole app. The PIN is stored on each phone (as a hash) and is not encryption; the entries still sync to your Drive.
+- **🎨 Look & feel** — 5 colour themes (Indigo, Mango, Ocean, Rose, Forest), light/dark, and 5 fonts. Each phone keeps its own choice.
+- **❓ Help** — the **?** button at the top runs a short guided tour; the small **i** buttons explain each part.
+- **Google sign-in** — one *Sign in with Google* button. Once Kaasu has a built-in Client ID, nobody needs to make their own; until then, the Client ID steps are under *Advanced*.
+
+---
+
 ## 4. Screens
 
 | Screen | What's there |
@@ -227,6 +237,9 @@ Plain HTML, CSS and JavaScript. There's no build step and nothing to install on 
   js/charts.js          charts (no libraries)
   js/ocr.js             reads bills (Tesseract.js, runs on the phone)
   js/drive.js           Google Drive sync
+  js/look.js            colour themes and fonts
+  js/lock.js            PIN for private entries
+  js/help.js            tips and the guided tour
   js/app.js             connects everything
   sw.js                 lets it open offline
   manifest.webmanifest  makes it installable

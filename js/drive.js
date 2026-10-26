@@ -14,6 +14,9 @@
   'use strict';
 
   const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  // Kaasu's own Google sign-in ID: with it, anyone can just tap "Sign in with Google".
+  // (A Client ID is public by design — it only says which app is asking.)
+  const BUILTIN_CLIENT_ID = '';
   const CFG_KEY = 'expense-tracker.drive.v1';
   const FOLDER = 'Expense Tracker';
   const DATA_FILE = 'expense-tracker-data.json';
@@ -53,7 +56,9 @@
     saveCfg();
   }
 
-  const isConfigured = () => !!cfg.clientId;
+  const effectiveId = () => cfg.clientId || BUILTIN_CLIENT_ID;
+  const isConfigured = () => !!effectiveId();
+  const usesBuiltin = () => !cfg.clientId && !!BUILTIN_CLIENT_ID;
   const hasToken = () => !!(token && token.expiresAt > Date.now() + 60 * 1000);
   const wasConnected = () => !!cfg.connected;
   const lastSync = () => cfg.lastSync || '';
@@ -70,7 +75,7 @@
     const state = Math.random().toString(36).slice(2);
     localStorage.setItem(CFG_KEY + '.state', state);
     const q = new URLSearchParams({
-      client_id: cfg.clientId, redirect_uri: redirectUri(), response_type: 'token',
+      client_id: effectiveId(), redirect_uri: redirectUri(), response_type: 'token',
       scope: SCOPE, include_granted_scopes: 'true', state,
     });
     if (!cfg.connected) q.set('prompt', 'consent');
@@ -102,13 +107,13 @@
    * finish instantly without asking again.
    */
   async function connect() {
-    if (!isConfigured()) throw new Error('Add your Google Client ID in Settings first.');
+    if (!isConfigured()) throw new Error('Google sign-in isn\'t set up yet — see Settings → Google Drive → Advanced.');
     if (isIOS()) { redirectSignIn(); return new Promise(() => {}); } // page leaves for Google and comes back
     await loadGIS();
     return new Promise((resolve, reject) => {
       if (!tokenClient) {
         tokenClient = root.google.accounts.oauth2.initTokenClient({
-          client_id: cfg.clientId,
+          client_id: effectiveId(),
           scope: SCOPE,
           callback: () => {},
         });
@@ -248,6 +253,6 @@
     await writeFile(name, content, mime || 'text/csv', reports);
   }
 
-  const api = { redirectResult: () => redirectResult, isIOS, redirectUri, copiesMerged: () => cfg.copiesMerged || 0, setClientId, isConfigured, hasToken, wasConnected, lastSync, account, connect, disconnect, sync, saveReport, clientId: () => cfg.clientId || '' };
+  const api = { redirectResult: () => redirectResult, isIOS, redirectUri, copiesMerged: () => cfg.copiesMerged || 0, setClientId, isConfigured, hasToken, wasConnected, lastSync, account, connect, disconnect, sync, saveReport, usesBuiltin, hasBuiltin: () => !!BUILTIN_CLIENT_ID, clientId: () => cfg.clientId || '', effectiveId };
   root.Drive = api;
 })(self);

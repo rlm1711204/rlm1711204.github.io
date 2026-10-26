@@ -293,6 +293,22 @@
     const REPEAT = /\b(every\s*month|each\s*month|per\s*month|monthly|every\s*mnth|maasam|maatham)\b/;
     const repeat = REPEAT.test(t);
     if (repeat) t = t.replace(REPEAT, ' ');
+    // "gift 2000 private" -> hidden behind your PIN
+    const PRIV = /\b(private|secret|hide|hidden)\b/;
+    const isPrivate = PRIV.test(t);
+    if (isPrivate) t = t.replace(PRIV, ' ');
+
+    // Family member who spent it: "papa: medicine 200", "medicine 200 by papa", "papa ne dawai 200"
+    let member = '';
+    for (const name of (ctx.members || []).slice().sort((a, b) => b.length - a.length)) {
+      const n = escapeRe(String(name).toLowerCase().trim());
+      if (!n) continue;
+      const re = new RegExp('(^|[^a-z0-9])(?:by\\s+|for\\s+)?' + n + '(?:\\s*[:\\-]|\\s+(?:ne|ka|ki|ke))?(?=$|[^a-z0-9])');
+      const mm = re.exec(t);
+      // "gave papa 3000" / "sent to mummy" names who RECEIVED money, not who spent it
+      if (mm && !/\b(gave|give|given|lent|sent|send|to|from|paid|pay)\s*$/.test(t.slice(0, mm.index + mm[1].length))) { member = name; t = t.replace(re, ' '); break; }
+    }
+
     // "shopping 800 need" / "course 2000 want" -> put it under that budget head
     const HEADW = /\b(needs?|wants?)\b/;
     const hm = HEADW.exec(t);
@@ -331,7 +347,7 @@
           ok: true, type: 'expense', amount: amtRes.amount,
           category: matchCategory(t, EXP_INDEX) ? matchCategory(t, EXP_INDEX).name : 'Gifts',
           person: titleCase(person), note: rest || ('Gift to ' + titleCase(person)),
-          date: dateRes.date, mode: modeRes.mode, repeat: false, bucket: bucket || 'want', raw,
+          date: dateRes.date, mode: modeRes.mode, repeat: false, bucket: bucket || 'want', member, private: isPrivate, raw,
         };
       }
       // "gave amma 2000" / "sent home 5000" is family support, not a loan.
@@ -372,6 +388,7 @@
         category = 'Personal loan';
       }
     }
+    if (isGift && type === 'expense' && category === 'Other') { category = 'Gifts'; if (!note) note = 'Gift'; }
     if (!note && type !== 'lent' && type !== 'borrowed' && type !== 'got_back' && type !== 'paid_back') {
       note = leftoverNote(t) || category;
     }
@@ -387,6 +404,7 @@
       mode: modeRes.mode,
       repeat: repeat && (type === 'expense' || type === 'income' || type === 'saving'),
       bucket: type === 'expense' ? bucket : '',
+      member, private: isPrivate,
       raw,
     };
   }

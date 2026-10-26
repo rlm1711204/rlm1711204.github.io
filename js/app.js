@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.9.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -56,12 +56,18 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   }
 
-  /* ---------- Theme ---------------------------------------------------- */
-  const THEME_KEY = 'expense-tracker.theme';
-  function applyTheme(v) {
-    if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme;
+  /* ---------- Private entries ------------------------------------------ */
+  // While locked, private entries are left out of lists (totals still count them).
+  const isLocked = () => Store.isMasked();
+  const hasPrivate = () => Store.active().some((t) => t.private);
+  const visibleList = (list) => (isLocked() ? list.filter((t) => !t.private) : list);
+  const lockedRow = (n) => (n ? `<button class="row locked-row" data-unlock><span class="ico">🔒</span><span class="what"><b>${n} private ${n === 1 ? 'entry' : 'entries'} hidden</b><span>Tap to unlock with your PIN</span></span></button>` : '');
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-unlock]')) Lock.unlockPrivate(); });
+  /** Before a download that would show private entries: unlock first. */
+  async function okToExport() {
+    if (!isLocked() || !hasPrivate()) return true;
+    return Lock.unlockPrivate('Enter your PIN — this file includes your private entries.');
   }
-  applyTheme(localStorage.getItem(THEME_KEY) || '');
 
   /* ---------- Navigation (uses #hash so the phone's Back button works) - */
   const VIEWS = ['home', 'history', 'people', 'reports', 'settings'];
@@ -97,10 +103,10 @@
   }
   function rowHTML(t, opts) {
     const d = describe(t);
-    const sub = [d.sub, t.recurId ? '🔁 monthly' : '', t.mode ? esc(t.mode) : '', opts && opts.showDate ? niceDate(t.date) : ''].filter(Boolean).join(' · ');
+    const sub = [t.private ? '🔒' : '', t.member ? '👤 ' + esc(t.member) : '', d.sub, t.recurId ? '🔁 monthly' : '', t.mode ? esc(t.mode) : '', opts && opts.showDate ? niceDate(t.date) : ''].filter(Boolean).join(' · ');
     const inflow = INFLOW.has(t.type);
     return `<button class="row" data-id="${t.id}">
-      <span class="ico">${Parser.iconFor(t.type, t.category)}</span>
+      <span class="ico">${t.masked ? '🔒' : Parser.iconFor(t.type, t.category)}</span>
       <span class="what"><b>${d.title}</b><span>${sub}</span></span>
       <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(t.amount)}${t.type === 'saving' ? '<small>saved</small>' : ''}</span>
     </button>`;
@@ -109,7 +115,13 @@
     const r = e.target.closest('.row[data-id]');
     if (r) {
       const t = Store.get().txns.find((x) => x.id === r.dataset.id);
-      if (t) openSheet({ mode: 'edit', rec: t });
+      if (!t) return;
+      if (t.private && isLocked()) {
+        const sheetOpen = $('#person-sheet').open;
+        Lock.unlockPrivate().then((ok) => { if (ok) { if (sheetOpen) $('#person-sheet').close(); openSheet({ mode: 'edit', rec: t }); } });
+        return;
+      }
+      openSheet({ mode: 'edit', rec: t });
     }
   });
 
@@ -121,7 +133,7 @@
 
   function ctx() {
     const people = Store.people();
-    return { learned: Store.get().learned, owesMe: (n) => people.some((p) => p.key === n.toLowerCase() && p.balance > 0) };
+    return { learned: Store.get().learned, members: Store.members(), owesMe: (n) => people.some((p) => p.key === n.toLowerCase() && p.balance > 0) };
   }
 
   function autoGrow() { quick.style.height = 'auto'; quick.style.height = Math.min(140, quick.scrollHeight) + 'px'; }
@@ -129,6 +141,8 @@
   function renderPreview() {
     const text = quick.value.trim();
     parsed = text ? Parser.parseMany(text, ctx()) : [];
+    // the chips under the box: who spent it, private
+    parsed.forEach((p) => { if (!p.ok) return; if (!p.member) p.member = qMember; if (qPrivate) p.private = true; });
     const good = parsed.filter((p) => p.ok);
     $('#btn-add').disabled = !good.length;
     $('#btn-add').textContent = good.length > 1 ? 'Add ' + good.length + ' entries' : 'Add';
@@ -139,12 +153,32 @@
       const typeLabel = Parser.TYPES[p.type].label;
       const when = p.repeat ? '🔁 every month on the ' + ordinal(+p.date.slice(8)) : niceDate(p.date);
       const headTag = p.type === 'expense' ? (Store.headOf(p) === 'need' ? '🧱 Need' : '🎈 Want') : '';
-      const bits = [p.type === 'expense' ? d.sub + ' · ' + headTag : typeLabel + (p.person ? '' : ' · ' + esc(p.category)), when, p.mode].filter(Boolean).join(' · ');
+      const bits = [p.private ? '🔒 Private' : '', p.member ? '👤 ' + esc(p.member) : '', p.type === 'expense' ? d.sub + ' · ' + headTag : typeLabel + (p.person ? '' : ' · ' + esc(p.category)), when, p.mode].filter(Boolean).join(' · ');
       return `<button class="pv" data-i="${i}"><span class="ico">${Parser.iconFor(p.type, p.category)}</span>
         <span class="what"><b>${d.title}</b><span>${bits}</span></span>
         <span class="amt">${inr(p.amount)}</span><span class="edit">Edit</span></button>`;
     }).join('');
   }
+  /* Who spent it (family) + private, chosen with chips under the box. */
+  let qMember = '', qPrivate = false;
+  function renderQuickChips() {
+    const mem = Store.members();
+    const box = $('#q-member');
+    box.hidden = !mem.length && !Lock.hasPin();
+    box.innerHTML = (mem.length ? '<span class="muted small">Spent by</span>' + ['', ...mem].map((m) => `<button type="button" class="chip sm ${m === qMember ? 'on' : ''}" data-qm="${esc(m)}">${m ? esc(m) : '👤 Self'}</button>`).join('') : '') +
+      `<button type="button" class="chip sm lock-chip ${qPrivate ? 'on' : ''}" data-qp aria-pressed="${qPrivate}">🔒 Private</button>` +
+      (mem.length ? '<button class="tip-btn" data-tip="member"></button>' : '');
+    Help.decorate(box);
+  }
+  $('#q-member').addEventListener('click', async (e) => {
+    const m = e.target.closest('[data-qm]');
+    if (m) { qMember = m.dataset.qm; renderQuickChips(); renderPreview(); return; }
+    if (e.target.closest('[data-qp]')) {
+      if (!qPrivate && !Lock.hasPin() && !(await Lock.ask({ mode: 'set', reason: 'Choose a PIN to hide private entries.' }))) return;
+      qPrivate = !qPrivate; renderQuickChips(); renderPreview();
+    }
+  });
+
   let pvTimer;
   quick.addEventListener('input', () => { autoGrow(); clearTimeout(pvTimer); pvTimer = setTimeout(renderPreview, 150); });
   quick.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); renderPreview(); addParsed(); } });
@@ -162,9 +196,12 @@
     autoGrow(); renderPreview();
   }
 
-  function addParsed() {
+  async function addParsed() {
     const good = parsed.filter((p) => p.ok);
     if (!good.length) return;
+    // a private entry needs a PIN on this phone to see it again
+    if (good.some((p) => p.private) && !Lock.hasPin()) await Lock.ask({ mode: 'set', reason: 'Choose a PIN — you\'ll need it to see private entries.' });
+    const resetChips = () => { if (qMember || qPrivate) { qMember = ''; qPrivate = false; renderQuickChips(); } };
     const bad = parsed.filter((p) => !p.ok);
     const monthly = good.filter((p) => p.repeat);
     for (const p of monthly) {
@@ -176,15 +213,17 @@
         quick.value = bad.map((p) => p.raw).join(', ');
         autoGrow(); renderPreview();
         const m = monthly[0];
+        resetChips();
         toast(monthly.length === 1 ? '🔁 ' + (m.note || m.category) + ' ' + inr(m.amount) + ' will be added every month on the ' + ordinal(+m.date.slice(8)) : '🔁 ' + monthly.length + ' monthly entries set up');
         return;
       }
     }
-    const added = Store.addMany(good.filter((p) => !p.repeat).map((p) => ({ type: p.type, amount: p.amount, category: p.category, person: p.person, note: p.note, date: p.date, mode: p.mode, bucket: p.bucket || '', raw: p.raw, source: p.source || 'text' })));
+    const added = Store.addMany(good.filter((p) => !p.repeat).map((p) => ({ type: p.type, amount: p.amount, category: p.category, person: p.person, note: p.note, date: p.date, mode: p.mode, bucket: p.bucket || '', member: p.member || '', private: !!p.private, raw: p.raw, source: p.source || 'text' })));
+    resetChips();
     quick.value = bad.map((p) => p.raw).join(', ');
     autoGrow(); renderPreview();
     const total = added.reduce((s, t) => s + t.amount, 0);
-    toast(added.length === 1 ? 'Added ' + inr(total) + ' · ' + (added[0].person || added[0].category) : 'Added ' + added.length + ' entries (' + inr(total) + ')', 'Undo', () => {
+    toast(added.length === 1 ? 'Added ' + inr(total) + ' · ' + (added[0].private ? '🔒 private' : added[0].person || added[0].category) : 'Added ' + added.length + ' entries (' + inr(total) + ')', 'Undo', () => {
       added.forEach((t) => Store.remove(t.id));
       toast('Removed');
     });
@@ -516,6 +555,8 @@
     $('#f-person-label').textContent = isPeople ? 'Person' : 'Spent on (optional)';
     $('#f-person').placeholder = isPeople ? '' : 'e.g. Manoj — money you won\'t ask back';
     $('#f-bucket-wrap').hidden = type !== 'expense';
+    $('#f-member-wrap').hidden = !Store.members().length && !sheetState.rec.member;
+    $('#f-member-wrap span').textContent = type === 'income' ? 'Whose income' : type === 'saving' ? 'Saved by' : PEOPLE_TYPES.has(type) ? 'Family member' : 'Spent by';
     updateBucketAuto();
     $('#f-cat-wrap').hidden = isPeople;
     fillCategories(type, isPeople ? 'Personal loan' : (sheetState.rec.type === type ? sheetState.rec.category : ''));
@@ -539,6 +580,11 @@
     $('#f-date').value = r.date || todayIso();
     $('#f-mode').value = r.mode || '';
     $('#people-list').innerHTML = Store.people().map((p) => `<option value="${esc(p.name)}">`).join('');
+    const mem = Store.members();
+    if (r.member && !mem.includes(r.member)) mem.push(r.member);
+    $('#f-member').innerHTML = ['', ...mem].map((m) => `<option value="${esc(m)}">${m ? esc(m) : '👤 Self'}</option>`).join('');
+    $('#f-member').value = r.member || '';
+    $('#f-private').checked = !!r.private;
     syncTypeFields();
     $('#f-category').value = r.category || $('#f-category').value;
     $('#f-bucket').value = r.bucket || '';
@@ -581,6 +627,8 @@
       date: $('#f-date').value || todayIso(),
       mode: $('#f-mode').value,
       bucket: type === 'expense' ? $('#f-bucket').value : '',
+      member: $('#f-member').value,
+      private: $('#f-private').checked,
     };
     // Teach the app: if you changed the category, remember it for this description/shop.
     const orig = s.rec;
@@ -611,6 +659,12 @@
     }
     sheet.close();
     if (s.onSaved) s.onSaved();
+  });
+
+  $('#f-private').addEventListener('change', async (e) => {
+    if (!e.target.checked || Lock.hasPin()) return;
+    const ok = await Lock.ask({ mode: 'set', reason: 'Choose a PIN — you\'ll need it to see private entries.' });
+    if (!ok) e.target.checked = false;
   });
 
   $('#f-delete').addEventListener('click', () => {
@@ -673,10 +727,21 @@
       $('#auto-sub').textContent = upcoming.length ? 'Next: ' + (upcoming[0].r.note || upcoming[0].r.category) + ' ' + inr(upcoming[0].r.amount) + ' on ' + shortDate(upcoming[0].d) : '';
     }
 
-    const recent = Store.active().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
-    $('#recent').innerHTML = recent.length ? recent.map((t) => rowHTML(t, { showDate: true })).join('')
-      : '<p class="empty">Nothing yet. Type <b>chai 20</b> above and tap Add — that\'s it!</p>';
+    const all = Store.active();
+    const recent = visibleList(all).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
+    const hiddenN = isLocked() ? all.filter((t) => t.private).length : 0;
+    $('#recent').innerHTML = (recent.length ? recent.map((t) => rowHTML(t, { showDate: true })).join('')
+      : hiddenN ? '' : '<p class="empty">Nothing yet. Type <b>chai 20</b> above and tap Add — that\'s it!</p>') + lockedRow(hiddenN);
+    renderQuickChips();
+    // first run of this version: offer the tour; Drive not set up: offer sign-in
+    $('#tour-offer').hidden = Help.wasSeen();
+    $('#drive-offer').hidden = Drive.wasConnected() || !Drive.isConfigured() || localStorage.getItem(DRIVE_OFFER_KEY) === '1' || !all.length;
   }
+  const DRIVE_OFFER_KEY = 'kaasu.driveOfferClosed';
+  $('#tour-start').addEventListener('click', () => Help.tour());
+  $('#tour-later').addEventListener('click', () => { Help.seen(); $('#tour-offer').hidden = true; toast('Tap ? at the top any time for the tour.'); });
+  $('#drive-offer-close').addEventListener('click', () => { localStorage.setItem(DRIVE_OFFER_KEY, '1'); $('#drive-offer').hidden = true; });
+  $('#drive-offer-go').addEventListener('click', () => doSync(true));
   $('#people-card').addEventListener('click', () => go('people'));
   $('#auto-card').addEventListener('click', () => { go('settings'); setTimeout(() => $('#rules-card').scrollIntoView({ behavior: 'smooth' }), 250); });
   $('#plan-edit').addEventListener('click', () => { go('settings'); setTimeout(() => $('#plan-settings').scrollIntoView({ behavior: 'smooth' }), 250); });
@@ -739,14 +804,25 @@
   /* =====================================================================
    * HISTORY
    * ===================================================================== */
-  const hist = { y: new Date().getFullYear(), m: new Date().getMonth(), f: 'all', q: '' };
+  const hist = { y: new Date().getFullYear(), m: new Date().getMonth(), f: 'all', q: '', mem: null };
   function renderHistory() {
     $('#h-month').textContent = monthName(hist.y, hist.m);
     const q = hist.q.trim().toLowerCase();
     let list = Store.active();
     if (!q) list = list.filter((t) => t.date >= monthStart(hist.y, hist.m) && t.date <= monthEnd(hist.y, hist.m));
+    const hiddenN = isLocked() ? list.filter((t) => t.private).length : 0;
+    list = visibleList(list);
+    if (hist.f === 'private' && isLocked()) hist.f = 'all';
     if (hist.f === 'people') list = list.filter((t) => PEOPLE_TYPES.has(t.type));
+    else if (hist.f === 'private') list = list.filter((t) => t.private);
     else if (hist.f !== 'all') list = list.filter((t) => t.type === hist.f);
+    if (hist.mem != null) list = list.filter((t) => (t.member || '') === hist.mem);
+    // filter chips: private (when unlocked), family members
+    $('#h-private').hidden = isLocked() || !hasPrivate();
+    $$('#h-filters .chip').forEach((x) => x.classList.toggle('on', x.dataset.f === hist.f));
+    const mem = Store.members();
+    $('#h-members').hidden = !mem.length;
+    $('#h-members').innerHTML = mem.length ? [[null, 'Everyone'], ['', '👤 Self'], ...mem.map((m) => [m, m])].map(([k, label]) => `<button class="chip sm ${hist.mem === k ? 'on' : ''}" data-m="${k == null ? '*' : esc(k)}">${esc(label)}</button>`).join('') : '';
     if (q) list = list.filter((t) => [t.note, t.category, t.person, t.mode, String(t.amount), Parser.TYPES[t.type].label, t.date].join(' ').toLowerCase().includes(q));
     list.sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || ''));
 
@@ -765,8 +841,13 @@
       }
       html += rowHTML(t);
     }
-    $('#history').innerHTML = html || '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>';
+    $('#history').innerHTML = (html || (hiddenN && hist.f === 'all' && hist.mem == null ? '' : '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>')) + (q ? '' : lockedRow(hiddenN));
   }
+  $('#h-members').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-m]'); if (!c) return;
+    hist.mem = c.dataset.m === '*' ? null : c.dataset.m;
+    renderHistory();
+  });
   $('#h-prev').addEventListener('click', () => { hist.m--; if (hist.m < 0) { hist.m = 11; hist.y--; } renderHistory(); });
   $('#h-next').addEventListener('click', () => { hist.m++; if (hist.m > 11) { hist.m = 0; hist.y++; } renderHistory(); });
   $('#search').addEventListener('input', (e) => { hist.q = e.target.value; renderHistory(); });
@@ -954,9 +1035,23 @@
         <span class="amt">${inr(Math.round(g.amount))}</span></button>`).join('');
     }
 
+    // By family member
+    const fam = Store.byMember(r.from, r.to).filter((x) => x.key === '' || x.count || Store.members().some((m) => m.toLowerCase() === x.key));
+    const showFam = Store.members().length > 0 || fam.some((x) => x.key && x.count);
+    $('#r-family-card').hidden = !showFam;
+    if (showFam) {
+      const famTotal = fam.reduce((s, x) => s + x.spent, 0);
+      $('#r-family-total').textContent = inr(Math.round(famTotal)) + ' spent';
+      $('#r-family').innerHTML = fam.map((x) => `<button class="item-row" data-member="${esc(x.key)}">
+        <span class="ico">${x.key ? esc(x.name.charAt(0).toUpperCase()) : '👤'}</span>
+        <span class="what"><b>${esc(x.name)}</b><span>${x.count} ${x.count === 1 ? 'entry' : 'entries'}${x.saved ? ' · saved ' + inr(Math.round(x.saved)) : ''}${famTotal ? ' · ' + Math.round((x.spent / famTotal) * 100) + '%' : ''}</span>
+          <span class="share"><i style="width:${famTotal ? Math.round((x.spent / famTotal) * 100) : 0}%"></i></span></span>
+        <span class="amt">${inr(Math.round(x.spent))}</span></button>`).join('');
+    }
+
     // Payment modes
     const modes = new Map();
-    Store.active().filter((x) => x.type === 'expense' && x.date >= r.from && x.date <= r.to).forEach((x) => modes.set(x.mode || 'Not set', (modes.get(x.mode || 'Not set') || 0) + x.amount));
+    Store.shown().filter((x) => x.type === 'expense' && x.date >= r.from && x.date <= r.to).forEach((x) => modes.set(x.mode || 'Not set', (modes.get(x.mode || 'Not set') || 0) + x.amount));
     const modeIcons = { UPI: '📱', Cash: '💵', Card: '💳', Bank: '🏦', 'Not set': '❔' };
     Charts.barList($('#r-modes'), [...modes.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, icon: modeIcons[k] || '', amount: v })), { color: 'var(--accent)', empty: 'No spending in this period.' });
 
@@ -988,6 +1083,14 @@
     const row = Store.byItem(r.from, r.to).find((x) => x.key === b.dataset.item);
     if (row) openGroup(row.name, row.amount + ' spent on this in ' + r.label, row.txns);
   });
+  $('#r-family').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-member]'); if (!b) return;
+    const r = reportRange();
+    const k = b.dataset.member;
+    const list = visibleList(Store.shown()).filter((t) => (t.member || '').toLowerCase() === k && (t.type === 'expense' || t.type === 'saving') && t.date >= r.from && t.date <= r.to);
+    const name = k ? (Store.members().find((m) => m.toLowerCase() === k) || list[0] && list[0].member || k) : 'Self';
+    openGroup('👤 ' + name, '', list);
+  });
   $('#r-gifts').addEventListener('click', (e) => {
     const b = e.target.closest('[data-gift]'); if (!b) return;
     const r = reportRange();
@@ -1009,7 +1112,7 @@
 
   function insights(r, t, p, cats) {
     const out = [];
-    const list = Store.active().filter((x) => x.date >= r.from && x.date <= r.to);
+    const list = Store.shown().filter((x) => x.date >= r.from && x.date <= r.to);
     if (!list.length) return ['No entries in this period yet.'];
     if (cats.length) {
       const total = cats.reduce((s, c) => s + c.amount, 0);
@@ -1024,7 +1127,7 @@
     }
     const items = Store.byItem(r.from, r.to).filter((x) => x.count > 1);
     if (items.length) out.push(`You spent most often on <b>${esc(items[0].name)}</b>: ${inr(Math.round(items[0].amount))} across ${items[0].count} entries.`);
-    const big = list.filter((x) => x.type === 'expense').sort((a, b) => b.amount - a.amount)[0];
+    const big = list.filter((x) => x.type === 'expense' && !x.masked).sort((a, b) => b.amount - a.amount)[0];
     if (big) out.push(`Biggest single spend: ${inr(big.amount)} on ${esc(big.note || big.category)} (${niceDate(big.date)}).`);
     const days = Math.max(1, Math.round((Math.min(new Date(r.to + 'T00:00:00'), new Date()) - new Date(r.from + 'T00:00:00')) / 864e5) + 1);
     if (t.expense) out.push(`Average spending: ${inr(Math.round(t.expense / days))} per day.`);
@@ -1037,18 +1140,21 @@
 
   /* ---------- Downloads -------------------------------------------------- */
   const fileLabel = () => reportRange().label.replace(/[^\w]+/g, '-').replace(/-+$/, '');
-  $('#dl-csv').addEventListener('click', () => {
+  $('#dl-csv').addEventListener('click', async () => {
+    if (!(await okToExport())) return;
     const r = reportRange();
     download('Kaasu-' + fileLabel() + '.csv', Store.toCSV(r.from, r.to), 'text/csv');
     toast('Downloaded — open it with Excel or Google Sheets.');
   });
   $('#dl-json').addEventListener('click', backupDownload);
-  $('#dl-pdf').addEventListener('click', () => {
+  $('#dl-pdf').addEventListener('click', async () => {
+    if (!(await okToExport())) return;
     buildPrintReport();
     toast(IS_IOS ? 'In the print screen, tap Share (□↑) → Save to Files to keep it as a PDF.' : 'Choose "Save as PDF" as the printer.');
     setTimeout(() => window.print(), 300);
   });
   $('#dl-drive').addEventListener('click', async () => {
+    if (!(await okToExport())) return;
     const r = reportRange();
     try {
       if (!Drive.isConfigured()) { toast('Set up Google Drive in Settings first.'); go('settings'); return; }
@@ -1065,6 +1171,7 @@
     const catTotal = cats.reduce((s, c) => s + c.amount, 0);
     const list = Store.active().filter((x) => x.date >= r.from && x.date <= r.to).sort((a, b) => a.date.localeCompare(b.date));
     const ppl = Store.people().filter((p) => Math.abs(p.balance) >= 0.5);
+    const fam = Store.members().length ? Store.byMember(r.from, r.to).filter((x) => x.count) : [];
     const html = `
       <h1>Kaasu — Money report</h1>
       <div>${esc(r.label)} (${r.from} to ${r.to}) · generated ${new Date().toLocaleString('en-IN')}</div>
@@ -1080,10 +1187,11 @@
       ${cats.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${inr(Math.round(c.amount))}</td><td class="num">${catTotal ? Math.round((c.amount / catTotal) * 100) : 0}%</td></tr>`).join('')}</tbody></table>
       ${ppl.length ? `<h2>Money given & taken (pending)</h2><table><thead><tr><th>Person</th><th>Status</th><th class="num">Amount</th></tr></thead><tbody>${ppl.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.balance > 0 ? 'Owes you' : 'You owe'}</td><td class="num">${inr(Math.abs(p.balance))}</td></tr>`).join('')}</tbody></table>` : ''}
       ${(() => { const its = Store.byItem(r.from, r.to); return its.length ? `<h2>By item name</h2><table><thead><tr><th>Item</th><th>Category</th><th class="num">Times</th><th class="num">Total</th></tr></thead><tbody>${its.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.category)}</td><td class="num">${x.count}</td><td class="num">${inr(Math.round(x.amount))}</td></tr>`).join('')}</tbody></table>` : ''; })()}
+      ${fam.length ? `<h2>By family member</h2><table><thead><tr><th>Member</th><th class="num">Entries</th><th class="num">Spent</th><th class="num">Saved</th></tr></thead><tbody>${fam.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${x.count}</td><td class="num">${inr(Math.round(x.spent))}</td><td class="num">${inr(Math.round(x.saved))}</td></tr>`).join('')}</tbody></table>` : ''}
       ${(() => { const gs = Store.gifts(r.from, r.to); return gs.length ? `<h2>Spent on people (not loans)</h2><table><thead><tr><th>Person</th><th class="num">Times</th><th class="num">Total</th></tr></thead><tbody>${gs.map((g) => `<tr><td>${esc(g.name)}</td><td class="num">${g.count}</td><td class="num">${inr(Math.round(g.amount))}</td></tr>`).join('')}</tbody></table>` : ''; })()}
       <h2>All entries (${list.length})</h2>
-      <table><thead><tr><th>Date</th><th>Type</th><th>Category / person</th><th>Description</th><th>Paid by</th><th class="num">Amount</th></tr></thead><tbody>
-      ${list.map((x) => `<tr><td>${x.date}</td><td>${Store.TYPE_LABEL[x.type]}</td><td>${esc(x.person || x.category)}</td><td>${esc(x.note)}</td><td>${esc(x.mode)}</td><td class="num">${INFLOW.has(x.type) ? '+' : '−'}${inr(x.amount)}</td></tr>`).join('')}</tbody></table>`;
+      <table><thead><tr><th>Date</th><th>Type</th><th>Category / person</th><th>Description</th>${fam.length ? '<th>Spent by</th>' : ''}<th>Paid by</th><th class="num">Amount</th></tr></thead><tbody>
+      ${list.map((x) => `<tr><td>${x.date}</td><td>${Store.TYPE_LABEL[x.type]}</td><td>${esc(x.person || x.category)}</td><td>${x.private ? '🔒 ' : ''}${esc(x.note)}</td>${fam.length ? `<td>${esc(x.member || 'Self')}</td>` : ''}<td>${esc(x.mode)}</td><td class="num">${INFLOW.has(x.type) ? '+' : '−'}${inr(x.amount)}</td></tr>`).join('')}</tbody></table>`;
     $('#print-report').innerHTML = html;
     Charts.barList($('#print-bars'), cats.map((c) => ({ label: c.category, icon: Parser.iconFor('expense', c.category), amount: c.amount })));
   }
@@ -1094,23 +1202,25 @@
   function renderSettings() {
     $('#origin-hint').textContent = location.origin;
     $('#redirect-hint').textContent = Drive.redirectUri();
-    $('#client-id').value = Drive.clientId();
+    if (document.activeElement !== $('#client-id')) $('#client-id').value = Drive.clientId();
     const connected = Drive.wasConnected();
-    $('#drive-setup').hidden = connected;
+    $('#drive-setup').hidden = connected && !!Drive.clientId();
+    $('#drive-setup').open = !Drive.isConfigured() && $('#drive-setup').open;
     $('#drive-connect').hidden = connected;
-    $('#drive-connect').disabled = !Drive.isConfigured();
     $('#drive-sync').hidden = !connected;
     $('#drive-disconnect').hidden = !connected;
-    $('#drive-status').innerHTML = !Drive.isConfigured() ? 'Not set up yet. Your records are saved on this phone only.'
-      : !connected ? 'Client ID saved. Tap <b>Connect Google Drive</b> and choose your Google account.'
-      : '✅ Connected' + (Drive.account() ? ' as <b>' + esc(Drive.account()) + '</b>' : '') + '. Records are saved in <b>My Drive → Expense Tracker</b>.' +
+    $('#drive-status').innerHTML = !Drive.isConfigured() ? 'Your records are saved on this phone only. Google sign-in needs a one-time setup — open <b>Advanced</b> below.'
+      : !connected ? 'Your records are saved on this phone only. Sign in to keep a copy in your Google Drive and use Kaasu on more phones.'
+      : '✅ Signed in' + (Drive.account() ? ' as <b>' + esc(Drive.account()) + '</b>' : '') + '. Records are saved in <b>My Drive → Expense Tracker</b>.' +
         (Drive.lastSync() ? '<br>Last synced: ' + new Date(Drive.lastSync()).toLocaleString('en-IN') + ' · ' + Store.active().length + ' entries' : '') +
-        '<br><span class="muted">Client ID …' + esc(Drive.clientId().split('.')[0].slice(-6)) + ' — must be the same on all your phones.</span>';
+        (Drive.clientId() ? '<br><span class="muted">Own Client ID …' + esc(Drive.clientId().split('.')[0].slice(-6)) + ' — use the same one on all your phones.</span>' : '');
+    renderMembers();
+    renderPrivacy();
+    renderLook();
     renderRules();
     renderPlanSettings();
     renderAI();
     $('#budget').value = Store.get().settings.budget || '';
-    $('#theme').value = localStorage.getItem(THEME_KEY) || '';
     const learned = Object.entries(Store.get().learned);
     $('#learned').innerHTML = learned.length ? learned.map(([k, v]) => `<button data-forget="${esc(k)}" title="Tap to forget">${esc(k)} → ${esc(v.category)} ✕</button>`).join('') : '<span class="muted small">Nothing yet.</span>';
     $('#version').textContent = 'Kaasu v' + APP_VERSION + ' · ' + Store.active().length + ' entries on this phone';
@@ -1251,17 +1361,112 @@
     toast(v ? 'Client ID saved. Now tap Connect.' : 'Client ID removed.');
     renderSettings();
   });
-  $('#drive-connect').addEventListener('click', () => doSync(true));
+  $('#drive-connect').addEventListener('click', () => {
+    if (!Drive.isConfigured()) { $('#drive-setup').open = true; $('#client-id').focus(); toast('Paste a Google Client ID first (steps below).'); return; }
+    doSync(true);
+  });
   $('#drive-sync').addEventListener('click', () => doSync(true));
   $('#drive-disconnect').addEventListener('click', () => {
-    if (!confirm('Stop saving to Google Drive? Your data stays on this phone and in Drive.')) return;
+    if (!confirm('Sign out and stop saving to Google Drive? Your data stays on this phone and in Drive.')) return;
     Drive.disconnect(); setPill(); renderSettings();
   });
   $('#budget').addEventListener('change', (e) => Store.setSetting('budget', Math.max(0, +e.target.value || 0)));
-  $('#theme').addEventListener('change', (e) => { localStorage.setItem(THEME_KEY, e.target.value); applyTheme(e.target.value); render(); });
+
+  /* ---------- Family members ------------------------------------------- */
+  function renderMembers() {
+    const mem = Store.members();
+    $('#members').innerHTML = '<span class="member-self">👤 Self (you)</span>' + mem.map((m) => `<button data-rm-member="${esc(m)}" aria-label="Remove ${esc(m)}">${esc(m)} ✕</button>`).join('');
+  }
+  function addMember() {
+    const name = $('#member-new').value.trim().replace(/\s+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 24);
+    if (!name) return;
+    const mem = Store.members();
+    if (/^(self|me|myself)$/i.test(name) || mem.some((m) => m.toLowerCase() === name.toLowerCase())) { toast(name + ' is already there.'); return; }
+    Store.setSetting('members', mem.concat(name));
+    $('#member-new').value = '';
+    toast('Added ' + name + '. Pick them under "Spent by", or type ' + name.toLowerCase() + ': medicine 200');
+  }
+  $('#member-add').addEventListener('click', addMember);
+  $('#member-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addMember(); } });
+  $('#members').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rm-member]'); if (!b) return;
+    const name = b.dataset.rmMember;
+    if (!confirm('Remove ' + name + ' from the list? Their entries stay (still marked ' + name + ').')) return;
+    Store.setSetting('members', Store.members().filter((m) => m !== name));
+    if (qMember === name) qMember = '';
+  });
+
+  /* ---------- Privacy & PIN --------------------------------------------- */
+  function renderPrivacy() {
+    const pin = Lock.hasPin();
+    const n = Store.active().filter((t) => t.private).length;
+    $('#pin-set').hidden = pin;
+    $('#pin-change').hidden = !pin;
+    $('#pin-remove').hidden = !pin;
+    $('#lock-opts').hidden = !pin;
+    $('#lock-app').checked = Lock.lockApp();
+    $('#lock-now').hidden = !Lock.isUnlocked();
+    $('#lock-status').innerHTML = !pin ? 'Set a PIN to hide private entries' + (n ? ' (' + n + ' private ' + (n === 1 ? 'entry' : 'entries') + ' are hidden on this phone until you do)' : '') + '.'
+      : (Lock.isUnlocked() ? '🔓 Unlocked' : '🔒 Locked') + ' · ' + n + ' private ' + (n === 1 ? 'entry' : 'entries') + '. Mark an entry private when you add or edit it.';
+  }
+  $('#pin-set').addEventListener('click', async () => { if (await Lock.ask({ mode: 'set' })) toast('PIN set 🔒'); });
+  $('#pin-change').addEventListener('click', async () => {
+    if (!(await Lock.ask({ mode: 'check', reason: 'Enter your current PIN.' }))) return;
+    if (await Lock.ask({ mode: 'set', reason: 'Now choose a new PIN.' })) toast('PIN changed');
+  });
+  $('#pin-remove').addEventListener('click', async () => {
+    if (!(await Lock.ask({ mode: 'check', reason: 'Enter your PIN to remove it.' }))) return;
+    const priv = Store.active().filter((t) => t.private);
+    if (!confirm(priv.length ? 'Remove the PIN? Your ' + priv.length + ' private ' + (priv.length === 1 ? 'entry becomes a normal entry' : 'entries become normal entries') + ' that anyone with your phone can see.' : 'Remove the PIN?')) return;
+    priv.forEach((t) => Store.update(t.id, { private: false }));
+    Lock.removePin();
+    toast('PIN removed');
+  });
+  $('#lock-app').addEventListener('change', (e) => { Lock.setLockApp(e.target.checked); toast(e.target.checked ? 'Kaasu will ask for your PIN when it opens' : 'Only private entries need the PIN now'); });
+  $('#lock-now').addEventListener('click', () => { Lock.lock(); toast('Locked 🔒'); });
+
+  // the lock button at the top: lock / unlock straight away
+  function renderLockBtn() {
+    const b = $('#lock-btn');
+    b.hidden = !Lock.hasPin() && !hasPrivate();
+    b.textContent = Lock.isUnlocked() ? '🔓' : '🔒';
+    b.setAttribute('aria-label', Lock.isUnlocked() ? 'Lock private entries' : 'Unlock private entries');
+    b.classList.toggle('unlocked', Lock.isUnlocked());
+  }
+  $('#lock-btn').addEventListener('click', () => { if (Lock.isUnlocked()) { Lock.lock(); toast('Locked 🔒'); } else Lock.unlockPrivate(); });
+  Lock.onChange((unlocked) => {
+    Store.setMasked(!unlocked);
+    render(); renderLockBtn();
+    if ($('#person-sheet').open) $('#person-sheet').close();
+  });
+
+  /* ---------- Look & feel ---------------------------------------------- */
+  function renderLook() {
+    $('#skins').innerHTML = Look.SKINS.map((k) => `<button type="button" class="skin ${Look.skin() === k.id ? 'on' : ''}" data-skin="${k.id}" aria-pressed="${Look.skin() === k.id}">
+      <i style="background:linear-gradient(135deg, ${k.a}, ${k.b})"></i><span>${esc(k.name)}</span></button>`).join('');
+    $$('#mode-seg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === Look.mode()));
+    $('#fonts').innerHTML = Look.FONTS.map((f) => `<button type="button" class="font-pick ${Look.font() === f.id ? 'on' : ''}" data-font="${f.id}" aria-pressed="${Look.font() === f.id}"><b class="ff-${f.id}">Aa ₹</b><span>${esc(f.name)}</span></button>`).join('');
+  }
+  $('#skins').addEventListener('click', (e) => { const b = e.target.closest('[data-skin]'); if (b) { Look.set({ skin: b.dataset.skin }); renderLook(); } });
+  $('#mode-seg').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) { Look.set({ mode: b.dataset.mode }); renderLook(); } });
+  $('#fonts').addEventListener('click', (e) => { const b = e.target.closest('[data-font]'); if (b) { Look.set({ font: b.dataset.font }); renderLook(); } });
+  // the font buttons show each font, so load them all while Settings is open
+  let fontsPreloaded = false;
+  function preloadFonts() {
+    if (fontsPreloaded) return; fontsPreloaded = true;
+    const css = Look.FONTS.filter((f) => f.css).map((f) => 'family=' + f.css).join('&');
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?' + css + '&display=swap';
+    document.head.appendChild(l);
+  }
+
+  /* ---------- Help ------------------------------------------------------- */
+  $('#help-btn').addEventListener('click', () => Help.tour());
+  $('#tour-settings').addEventListener('click', () => Help.tour());
+  $('#tips-typing').addEventListener('click', () => Help.tip('quick'));
   $('#learned').addEventListener('click', (e) => { const b = e.target.closest('[data-forget]'); if (b) Store.forget(b.dataset.forget); });
 
-  function backupDownload() {
+  async function backupDownload() {
+    if (!(await okToExport())) return;
     download('Kaasu-backup-' + todayIso() + '.json', JSON.stringify(Store.get(), null, 1), 'application/json');
     toast('Backup downloaded. Keep it somewhere safe.');
   }
@@ -1375,10 +1580,12 @@
     else if (current === 'history') renderHistory();
     else if (current === 'people') renderPeople();
     else if (current === 'reports') renderReports();
-    else if (current === 'settings') renderSettings();
+    else if (current === 'settings') { renderSettings(); preloadFonts(); }
+    renderLockBtn();
   }
 
   Store.load();
+  Store.setMasked(!Lock.isUnlocked());
   Store.applyRecurring(); // add any monthly entries that became due since last time
   setInterval(() => Store.applyRecurring(), 60 * 60 * 1000);
   Store.onChange(() => { render(); scheduleSync(); if ($('#person-sheet').open) openPerson(personKey); });
@@ -1387,6 +1594,7 @@
 
   show(location.hash.slice(1) || 'home');
   setPill();
+  if (Lock.lockApp()) Lock.ask({ mandatory: true }); // "Ask for the PIN every time Kaasu opens"
   const rr = Drive.redirectResult();
   if (rr && rr.error) { setTimeout(() => toast(rr.error), 500); go('settings'); }
   if (Drive.wasConnected() && Drive.hasToken()) doSync(!!(rr && rr.ok));
@@ -1395,5 +1603,5 @@
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
   // Handy for testing in the browser console.
-  window.Kaasu = { Store, Parser, version: APP_VERSION };
+  window.Kaasu = { Store, Parser, Lock, version: APP_VERSION };
 })();

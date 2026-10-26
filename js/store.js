@@ -27,6 +27,7 @@
         baseAmount: 0,
         carryForward: true,    // add last month's leftover to this month
         bucketMap: {},         // category -> 'need' | 'want' (your changes to the defaults)
+        members: [],           // family members besides yourself, e.g. ['Papa', 'Mummy']
       },
       updatedAt: now(),
     };
@@ -57,6 +58,34 @@
 
   function active() { return data.txns.filter((t) => !t.deleted); }
 
+  /* ---------- Private entries ---------------------------------------------
+   * While locked, lists and breakdowns see private entries only as
+   * "🔒 Private" (amount still counts, so totals and budgets stay right). */
+  let masked = false;
+  function setMasked(on) { masked = !!on; }
+  const isMasked = () => masked;
+  const PRIVATE = 'Private';
+  function shown() {
+    if (!masked) return active();
+    return active().map((t) => (t.private ? Object.assign({}, t, { category: PRIVATE, note: 'Private entry', person: t.person ? PRIVATE : '', mode: '', masked: true }) : t));
+  }
+
+  /* ---------- Family members ----------------------------------------------- */
+  const members = () => (data.settings.members || []).slice();
+  /** Spending of each family member ('' = Self) between two dates. */
+  function byMember(from, to) {
+    const m = new Map([['', { key: '', name: 'Self', spent: 0, saved: 0, count: 0 }]]);
+    for (const name of members()) m.set(name.toLowerCase(), { key: name.toLowerCase(), name, spent: 0, saved: 0, count: 0 });
+    for (const t of active()) {
+      if (!inRange(t, from, to) || (t.type !== 'expense' && t.type !== 'saving')) continue;
+      const k = (t.member || '').toLowerCase();
+      const row = m.get(k) || m.set(k, { key: k, name: t.member, spent: 0, saved: 0, count: 0 }).get(k);
+      if (t.type === 'expense') row.spent += t.amount; else row.saved += t.amount;
+      row.count++;
+    }
+    return [...m.values()].map((r) => Object.assign(r, { spent: Math.round(r.spent * 100) / 100, saved: Math.round(r.saved * 100) / 100 }));
+  }
+
   function add(rec) {
     const t = {
       id: uid(),
@@ -68,6 +97,8 @@
       date: rec.date,
       mode: rec.mode || '',
       bucket: rec.bucket || '',       // '' = automatic (by category), or 'need' / 'want'
+      member: rec.member || '',       // '' = you (Self), else a family member's name
+      private: !!rec.private,         // hidden behind your PIN
       source: rec.source || 'text',   // text | bill | voice | manual
       raw: rec.raw || '',
       createdAt: now(),
@@ -291,7 +322,7 @@
   function byCategory(from, to, type) {
     type = type || 'expense';
     const m = new Map();
-    for (const t of active()) if (t.type === type && inRange(t, from, to)) m.set(t.category, (m.get(t.category) || 0) + t.amount);
+    for (const t of shown()) if (t.type === type && inRange(t, from, to)) m.set(t.category, (m.get(t.category) || 0) + t.amount);
     return [...m.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
   }
 
@@ -311,7 +342,7 @@
     opts = opts || {};
     const types = opts.types || ['expense'];
     const m = new Map();
-    for (const t of active()) {
+    for (const t of shown()) {
       if (!types.includes(t.type) || !inRange(t, from, to)) continue;
       // everything spent on one person groups under that person's name
       const key = (t.type === 'expense' && t.person) ? 'person:' + t.person.trim().toLowerCase() : itemKey(t.note, t.category);
@@ -342,7 +373,7 @@
    */
   function gifts(from, to) {
     const m = new Map();
-    for (const t of active()) {
+    for (const t of shown()) {
       if (t.type !== 'expense' || !t.person) continue;
       if (from && !inRange(t, from, to)) continue;
       const key = t.person.trim().toLowerCase();
@@ -388,7 +419,7 @@
    */
   function people() {
     const m = new Map();
-    for (const t of active()) {
+    for (const t of shown()) {
       if (!t.person || !['lent', 'borrowed', 'got_back', 'paid_back'].includes(t.type)) continue;
       const key = t.person.trim().toLowerCase();
       const p = m.get(key) || { key, name: t.person.trim(), balance: 0, given: 0, taken: 0, last: '', txns: [] };
@@ -513,13 +544,13 @@
 
   /** CSV that opens directly in Excel / Google Sheets. */
   function toCSV(from, to, txns) {
-    const rows = [['Date', 'Type', 'Category', 'Budget head', 'Person', 'Description', 'Amount (INR)', 'In/Out', 'Payment mode', 'Added by']];
+    const rows = [['Date', 'Type', 'Category', 'Budget head', 'Person', 'Description', 'Amount (INR)', 'In/Out', 'Payment mode', 'Spent by', 'Private', 'Added by']];
     const src = txns ? txns.filter((t) => !t.deleted) : active();
     const list = src.filter((t) => (!from || inRange(t, from, to))).sort((a, b) => a.date.localeCompare(b.date));
     for (const t of list) {
       const inflow = ['income', 'borrowed', 'got_back'].includes(t.type);
       const h = headOf(t);
-      rows.push([t.date, TYPE_LABEL[t.type] || t.type, t.category, h ? { need: 'Need', want: 'Want', saving: 'Saving' }[h] : '', t.person, t.note, t.amount.toFixed(2), inflow ? 'In' : 'Out', t.mode, t.source || '']);
+      rows.push([t.date, TYPE_LABEL[t.type] || t.type, t.category, h ? { need: 'Need', want: 'Want', saving: 'Saving' }[h] : '', t.person, t.note, t.amount.toFixed(2), inflow ? 'In' : 'Out', t.mode, t.member || 'Self', t.private ? 'Yes' : '', t.source || '']);
     }
     const esc = (v) => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     return '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n'); // ﻿ = Excel reads ₹ and Tamil correctly
@@ -527,6 +558,7 @@
 
   const api = {
     load, save, onChange, get, active, add, addMany, update, remove, restore, learn, forget, setSetting,
+    shown, setMasked, isMasked, members, byMember, PRIVATE,
     byItem, itemKey, gifts, budgetPlan, carryInto, headOf, categoryHead, HEADS, SPLIT_PRESETS, NEED_CATEGORIES,
     rules, addRule, updateRule, removeRule, linkToRule, applyRecurring, nextRun, ruleDate,
     merge, replaceAll, totals, byCategory, byDay, byMonth, people, owesMe, toCSV, emptyData, TYPE_LABEL,

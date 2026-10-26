@@ -123,3 +123,17 @@ assert.strictEqual(g2.type, 'expense'); assert.strictEqual(g2.person, 'Dilmaan')
 assert.strictEqual(P.parseOne('gave ravi 2000', ctx).type, 'lent');   // still a loan without the word
 assert.strictEqual(P.parseOne('gift 500', ctx).type, 'expense');       // no name -> plain expense
 console.log('gift entries ok');
+
+// Family members and private entries
+const fam = Object.assign({}, ctx, { members: ['Papa', 'Mummy'] });
+const m1 = P.parseOne('papa: medicine 200', fam);
+assert.strictEqual(m1.member, 'Papa'); assert.strictEqual(m1.category, 'Health'); assert.strictEqual(m1.note, 'Medicine');
+assert.strictEqual(P.parseOne('vegetables 150 by mummy', fam).member, 'Mummy');
+assert.strictEqual(P.parseOne('papa ne petrol 500', fam).member, 'Papa');
+assert.strictEqual(P.parseOne('chai 20', fam).member, '');                 // default: Self
+const pr = P.parseOne('gift 2000 private', fam);
+assert.strictEqual(pr.private, true); assert.strictEqual(pr.amount, 2000); assert.strictEqual(pr.category, 'Gifts');
+assert.strictEqual(P.parseOne('chai 20', fam).private, false);
+const gp = P.parseOne('gave papa 3000', fam);
+assert.strictEqual(gp.member, ''); assert.strictEqual(gp.amount, 3000);       // papa received it
+console.log('family & private ok');
