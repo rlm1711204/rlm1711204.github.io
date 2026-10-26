@@ -9,7 +9,8 @@
   const OLD_THEME_KEY = 'expense-tracker.theme';   // light/dark, from older versions
 
   const SKINS = [
-    { id: 'indigo', name: 'Kaasu Indigo', a: '#3f3cbb', b: '#6a43c9' },
+    { id: 'radiant', name: 'Radiant', a: '#de0f3c', b: '#2f45ff' },
+    { id: 'indigo', name: 'Indigo', a: '#3f3cbb', b: '#6a43c9' },
     { id: 'mango', name: 'Mango', a: '#c2410c', b: '#a16207' },
     { id: 'ocean', name: 'Ocean', a: '#0e7490', b: '#1d4ed8' },
     { id: 'rose', name: 'Rose', a: '#be185d', b: '#7e22ce' },
@@ -47,7 +48,7 @@
     // phone status bar in the theme's colour
     document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
       const dark = /dark/.test(m.media || '') ? true : /light/.test(m.media || '') ? false : null;
-      m.content = (cfg.mode === 'dark' || (dark && cfg.mode !== 'light')) ? '#121211' : skin.a;
+      m.content = (cfg.mode === 'dark' || (dark && cfg.mode !== 'light')) ? (skin.id === 'radiant' ? '#090b16' : '#121211') : skin.a;
     });
   }
 

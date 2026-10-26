@@ -106,6 +106,13 @@ My Drive/
 
 ---
 
+## New in v1.11 — Radiant look and new logo
+
+- New logo: a glowing ₹ coin on a red-to-blue tile (also on the Android app).
+- New default theme **Radiant** (vibrant red + blue). The old look is **Indigo** in Settings → Look & feel.
+- Money left sits in a ring that fills as you spend; the typing bar floats over it.
+- Needs · Wants · Savings are three ring dials; the tab bar floats, with the open tab lit up.
+
 ## New in v1.10 — calmer, compact screens
 
 - Home shows only what matters: the typing box, Money left, a one-line budget plan (tap to open), and recent entries in one neat list.

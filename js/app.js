@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.10.0';
+  const APP_VERSION = '1.11.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -92,6 +92,8 @@
   }
   function go(view) { if (location.hash !== '#' + view) location.hash = view === 'home' ? '' : view; else show(view); }
   window.addEventListener('hashchange', () => show(location.hash.slice(1) || 'home'));
+  // the top bar gets a background once the page scrolls under it
+  window.addEventListener('scroll', () => $('.topbar').classList.toggle('scrolled', window.scrollY > 8), { passive: true });
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-go]');
     if (b) go(b.dataset.go);
@@ -99,7 +101,23 @@
     if (c) c.closest('dialog').close();
   });
 
+  /* ---------- Rings (Money left, budget heads) ------------------------- */
+  /** A round progress ring. parts: [{ frac, cls }] drawn one after another. */
+  function ring(parts, size, stroke, center) {
+    const r = (size - stroke) / 2, c = 2 * Math.PI * r;
+    let start = 0;
+    const arcs = parts.filter((p) => p.frac > 0.001).map((p) => {
+      const len = Math.min(p.frac, 1 - start) * c;
+      const el = `<circle class="arc ${p.cls}" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}" stroke-dasharray="${len} ${c}" stroke-dashoffset="${-start * c}"/>`;
+      start = Math.min(1, start + p.frac);
+      return el;
+    }).join('');
+    return `<svg class="ring-svg" viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px"><g transform="rotate(-90 ${size / 2} ${size / 2})">
+      <circle class="track" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="${stroke}"/>${arcs}</g></svg><span class="ring-center">${center}</span>`;
+  }
+
   /* ---------- Rows (one record in a list) ------------------------------ */
+  const ICO_TONE = { expense: 'out', income: 'in', saving: 'save', lent: 'ppl', borrowed: 'ppl', got_back: 'ppl', paid_back: 'ppl' };
   function describe(t) {
     const who = esc(t.person);
     switch (t.type) {
@@ -115,7 +133,7 @@
     const sub = [t.private ? '🔒' : '', t.member ? '👤 ' + esc(t.member) : '', d.sub, t.recurId ? '🔁 monthly' : '', t.mode ? esc(t.mode) : '', opts && opts.showDate ? niceDate(t.date) : ''].filter(Boolean).join(' · ');
     const inflow = INFLOW.has(t.type);
     return `<button class="row" data-id="${t.id}">
-      <span class="ico">${t.masked ? '🔒' : Parser.iconFor(t.type, t.category)}</span>
+      <span class="ico ${t.masked ? 'lock' : ICO_TONE[t.type] || ''}">${t.masked ? '🔒' : Parser.iconFor(t.type, t.category)}</span>
       <span class="what"><b>${d.title}</b><span>${sub}</span></span>
       <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(t.amount)}${t.type === 'saving' ? '<small>saved</small>' : ''}</span>
     </button>`;
@@ -690,12 +708,17 @@
     const plan = Store.budgetPlan(y, m);
     $('#hero-left').textContent = inr(Math.round(plan.totalLeft));
     $('#hero-left').classList.toggle('neg', plan.totalLeft < 0);
+    // the ring: how much of this month's money is spent and saved
+    const base = plan.base > 0 ? plan.base : t.income;
+    const pctLeft = base > 0 ? Math.round((Math.max(0, plan.totalLeft) / base) * 100) : null;
+    $('#hero-ring').innerHTML = ring(base > 0 ? [{ frac: t.expense / base, cls: 'spent' }, { frac: t.saving / base, cls: 'saved' }] : [], 104, 11,
+      pctLeft == null ? '<b>—</b>' : '<b>' + Math.min(100, pctLeft) + '%</b><small>left</small>');
     const prevName = new Date(y, m - 1, 1).toLocaleString('en-IN', { month: 'short' });
     const showCarry = Store.get().settings.carryForward !== false && (plan.carry || plan.hasEarlier);
     $('#hero-carry').hidden = !showCarry;
     if (showCarry) {
       const sign = plan.carry < 0 ? '−' : '+';
-      $('#hero-carry').innerHTML = '· this month ' + inr(Math.round(plan.monthLeft)) + ' ' + sign +
+      $('#hero-carry').innerHTML = 'This month ' + inr(Math.round(plan.monthLeft)) + ' ' + sign +
         ' ' + prevName + ' <b class="' + (plan.carry < 0 ? 'neg-ink' : '') + '">' + inr(Math.abs(Math.round(plan.carry))) + '</b>';
     }
     renderPlan($('#plan-body'), plan, true);
@@ -764,8 +787,8 @@
       const save = h.key === 'saving';
       const cls = save ? 'save' : ratio > 1 ? 'danger' : ratio > pace + 0.1 ? 'warn' : '';
       const val = save ? (h.left > 0 ? inr(Math.round(h.left)) : '✓') : inr(Math.round(h.left));
-      return `<span class="mini-head"><small>${icons[h.key]} ${h.label}</small><b class="${!save && h.left < 0 ? 'neg-ink' : ''}">${val}</b>
-        <span class="mini-bar"><i class="${cls}" style="width:${Math.min(100, ratio * 100)}%"></i></span><small>${save ? (h.left > 0 ? 'to save' : 'target met') : h.left < 0 ? 'over' : 'left'}</small></span>`;
+      return `<span class="mini-head h-${h.key}"><span class="ring sm">${ring([{ frac: Math.min(1, ratio), cls: cls || 'h-' + h.key }], 58, 7, icons[h.key])}</span>
+        <small>${h.label}</small><b class="${!save && h.left < 0 ? 'neg-ink' : ''}">${val}</b><small>${save ? (h.left > 0 ? 'to save' : 'target met') : h.left < 0 ? 'over' : 'left'}</small></span>`;
     }).join('');
   }
 
