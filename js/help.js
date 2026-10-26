@@ -128,7 +128,7 @@
     });
   }
   document.addEventListener('click', (e) => {
-    const b = e.target.closest('.tip-btn[data-tip]');
+    const b = e.target.closest('.tip-btn[data-tip], .tip-link[data-tip]');
     if (!b) return;
     e.preventDefault(); e.stopPropagation();
     tip(b.dataset.tip);

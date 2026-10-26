@@ -41,31 +41,25 @@
   <main id="main">
     <!-- ============ HOME ============ -->
     <section id="view-home" class="view" data-title="Kaasu">
-      <div class="card tour-offer" id="tour-offer" hidden>
-        <p><b>👋 New in Kaasu:</b> family members, 🔒 private entries with a PIN, colour themes and Google sign-in.</p>
-        <div class="btn-row"><button class="btn primary" id="tour-start">Show me around (1 min)</button><button class="btn ghost" id="tour-later">Later</button></div>
+      <div class="note-bar" id="tour-offer" hidden>
+        <span>👋 <b>New:</b> family, private entries, themes</span>
+        <button class="btn sm primary" id="tour-start">Quick tour</button>
+        <button class="icon-btn xs" id="tour-later" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
 
       <div class="card quick">
-        <div class="quick-head"><label for="quick" class="quick-label">What did you spend or get?</label><button class="tip-btn" data-tip="quick"></button></div>
         <div class="quick-row">
-          <textarea id="quick" rows="1" placeholder="chai 20, petrol 500 upi…" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></textarea>
+          <textarea id="quick" rows="1" placeholder="e.g. chai 20, auto 60" aria-label="What did you spend or get?" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></textarea>
           <button id="btn-mic" class="icon-btn" title="Speak" aria-label="Speak">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           </button>
-          <button id="btn-scan" class="icon-btn" title="Scan a bill" aria-label="Scan a bill">
+          <button id="btn-scan" class="icon-btn accent" title="Scan a bill" aria-label="Scan a bill">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 9h8M8 12h8M8 15h5"/></svg>
           </button>
         </div>
         <div class="q-member" id="q-member" hidden></div>
         <div id="preview" class="preview" aria-live="polite"></div>
-        <button id="btn-add" class="btn primary block" disabled>Add</button>
-        <div id="examples" class="examples">
-          <span>Try:</span>
-          <button>chai 20</button><button>petrol 500 upi</button><button>salary 55000</button>
-          <button>gave ravi 2000</button><button>ravi returned 1000</button><button>sip 5000</button>
-          <button>lunch 150 yesterday</button><button>took 500 from kumar</button>
-        </div>
+        <button id="btn-add" class="btn primary block" hidden>Add</button>
       </div>
 
       <div class="card ios-install" id="ios-install" hidden>
@@ -73,50 +67,53 @@
         <ol class="ios-steps" id="ios-steps"></ol>
       </div>
 
-      <div class="card drive-offer" id="drive-offer" hidden>
-        <div class="card-head"><h3>☁️ Keep a copy in Google Drive</h3><button class="icon-btn sm" id="drive-offer-close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-        <p class="muted small">Sign in once — Kaasu then saves your records in your own Drive after every change.</p>
-        <button class="btn gsi block" id="drive-offer-go"><svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg> Sign in with Google</button>
-      </div>
-
       <div class="card hero">
         <div class="hero-head">
-          <span class="muted" id="hero-month">This month</span>
-          <span class="muted small" id="hero-sub"></span>
+          <span id="hero-month">This month</span>
+          <span class="small" id="hero-sub"></span>
           <button class="tip-btn" data-tip="hero"></button>
         </div>
-        <div class="hero-label">Money left</div>
         <div class="hero-value" id="hero-left">₹0</div>
-        <div class="hero-carry muted small" id="hero-carry" hidden></div>
+        <div class="hero-label">Money left <span class="hero-carry" id="hero-carry" hidden></span></div>
         <div class="tiles">
-          <div class="tile"><span class="dot" style="background:var(--c-spend)"></span><span class="tile-label">Spent</span><span class="tile-value" id="t-spent">₹0</span></div>
-          <div class="tile"><span class="dot" style="background:var(--c-income)"></span><span class="tile-label">Income</span><span class="tile-value" id="t-income">₹0</span></div>
-          <div class="tile"><span class="dot" style="background:var(--c-save)"></span><span class="tile-label">Saved</span><span class="tile-value" id="t-saved">₹0</span></div>
+          <div class="tile"><span class="tile-label"><i class="dot" style="background:var(--c-spend)"></i>Spent</span><span class="tile-value" id="t-spent">₹0</span></div>
+          <div class="tile"><span class="tile-label"><i class="dot" style="background:var(--c-income)"></i>Income</span><span class="tile-value" id="t-income">₹0</span></div>
+          <div class="tile"><span class="tile-label"><i class="dot" style="background:var(--c-save)"></i>Saved</span><span class="tile-value" id="t-saved">₹0</span></div>
         </div>
         <div id="budget-box" class="budget" hidden>
-          <div class="budget-head"><span>Budget</span><span id="budget-text"></span></div>
+          <div class="budget-head"><span>Spending limit</span><span id="budget-text"></span></div>
           <div class="meter"><span id="budget-fill"></span></div>
         </div>
       </div>
 
-      <div class="card" id="plan-card">
-        <div class="card-head"><h3><span id="plan-title">Budget plan</span> <button class="tip-btn" data-tip="plan"></button></h3><button class="link small" id="plan-edit">Change</button></div>
-        <div id="plan-body"></div>
+      <details class="card fold" id="plan-card">
+        <summary>
+          <span class="fold-title"><b id="plan-title">Budget plan</b><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></span>
+          <span class="mini-heads" id="plan-mini"></span>
+        </summary>
+        <div class="fold-body">
+          <div id="plan-body"></div>
+          <div class="fold-foot"><button class="link small" id="plan-edit">Change split</button><button class="tip-btn" data-tip="plan"></button></div>
+        </div>
+      </details>
+
+      <div class="shortcuts">
+        <button id="people-card" class="shortcut" hidden>
+          <span class="sc-ico">🤝</span>
+          <span class="sc-text"><small>Others owe you</small><b id="pc-owe-me" class="pos">₹0</b><small id="pc-i-owe-wrap">You owe <span id="pc-i-owe">₹0</span></small></span>
+        </button>
+        <button id="auto-card" class="shortcut" hidden>
+          <span class="sc-ico">🔁</span>
+          <span class="sc-text"><small id="auto-title">Next monthly</small><b id="auto-next"></b><small id="auto-sub"></small></span>
+        </button>
       </div>
 
-      <button id="people-card" class="card people-card" hidden>
-        <div><span class="muted small">Others owe you</span><strong id="pc-owe-me" class="pos">₹0</strong></div>
-        <div><span class="muted small">You owe others</span><strong id="pc-i-owe">₹0</strong></div>
-        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-      </button>
+      <div class="card drive-offer" id="drive-offer" hidden>
+        <button class="btn gsi" id="drive-offer-go"><svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg> Back up to Google Drive</button>
+        <button class="icon-btn xs" id="drive-offer-close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
 
-      <button id="auto-card" class="card auto-card" hidden>
-        <span class="auto-ico">🔁</span>
-        <span class="auto-text"><b id="auto-title">Monthly auto entries</b><span id="auto-sub" class="muted small"></span></span>
-        <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-      </button>
-
-      <div class="section-head"><h2>Recent <button class="tip-btn" data-tip="recent"></button></h2><button class="link" data-go="history">See all</button></div>
+      <div class="section-head"><h2>Recent</h2><button class="link" data-go="history">See all</button></div>
       <div id="recent" class="list"></div>
     </section>
 
@@ -149,211 +146,246 @@
         <div class="tile big"><span class="tile-label">Others owe you</span><span class="tile-value pos" id="p-owe-me">₹0</span></div>
         <div class="tile big"><span class="tile-label">You owe others</span><span class="tile-value" id="p-i-owe">₹0</span></div>
       </div>
-      <p class="hint">Type <b>gave ravi 2000</b> or <b>took 500 from kumar</b> on Home. <button class="tip-btn" data-tip="people"></button></p>
+      <p class="hint">How to add <button class="tip-btn" data-tip="people"></button></p>
       <div id="people" class="list"></div>
     </section>
 
     <!-- ============ REPORTS ============ -->
     <section id="view-reports" class="view" data-title="Reports" hidden>
-      <div class="chips" id="r-range">
-        <button class="chip on" data-r="month">Month</button>
-        <button class="chip" data-r="3m">3 months</button>
-        <button class="chip" data-r="year">Year</button>
-        <button class="chip" data-r="all">All time</button>
-      </div>
-      <div class="month-nav center">
-        <button class="icon-btn sm" id="r-prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-        <span id="r-label"></span>
-        <button class="icon-btn sm" id="r-next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      <div class="r-top">
+        <div class="seg four" id="r-range">
+          <button class="chip on" data-r="month">Month</button>
+          <button class="chip" data-r="3m">3 months</button>
+          <button class="chip" data-r="year">Year</button>
+          <button class="chip" data-r="all">All</button>
+        </div>
+        <div class="month-nav center">
+          <button class="icon-btn sm" id="r-prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <span id="r-label"></span>
+          <button class="icon-btn sm" id="r-next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
       </div>
 
       <div class="tiles four" id="r-tiles"></div>
-      <p class="muted small r-tipline">How reports work <button class="tip-btn" data-tip="reports"></button></p>
-
-      <div class="card" id="r-plan-card">
-        <h3 id="r-plan-title">Budget plan</h3>
-        <div id="r-plan"></div>
-      </div>
 
       <div class="card">
-        <h3>Quick insights</h3>
-        <ul id="r-insights" class="insights"></ul>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>Where your money went</h3><button class="link small" data-table="r-cat-table">Table</button></div>
+        <div class="card-head"><h3>Where your money went <button class="tip-btn" data-tip="reports"></button></h3><button class="link small" data-table="r-cat-table">Table</button></div>
         <div id="r-cats"></div>
         <div id="r-cat-table" class="table-wrap" hidden></div>
       </div>
 
-      <div class="card" id="r-daily-card">
-        <h3 id="r-daily-title">Spending each day</h3>
-        <div id="r-daily"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>Income, spent &amp; saved — last 6 months</h3><button class="link small" data-table="r-trend-table">Table</button></div>
-        <div id="r-trend"></div>
-        <div id="r-trend-table" class="table-wrap" hidden></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>By item name <button class="tip-btn" data-tip="items"></button></h3><span class="muted small" id="r-items-count"></span></div>
-        <input id="r-item-search" type="search" placeholder="Search an item…" autocomplete="off">
-        <div id="r-items"></div>
-        <button class="link small" id="r-items-more" hidden>Show all</button>
-      </div>
-
-      <div class="card" id="r-gifts-card" hidden>
-        <div class="card-head"><h3>🎁 Spent on people <button class="tip-btn" data-tip="gifts"></button></h3><span class="muted small" id="r-gifts-total"></span></div>
-        <div id="r-gifts"></div>
-      </div>
-
-      <div class="card" id="r-family-card" hidden>
-        <div class="card-head"><h3>👨‍👩‍👧 By family member <button class="tip-btn" data-tip="familyReport"></button></h3><span class="muted small" id="r-family-total"></span></div>
-        <div id="r-family"></div>
-      </div>
-
-      <div class="card">
-        <h3>How you paid</h3>
-        <div id="r-modes"></div>
-      </div>
-
-      <div class="card">
-        <h3>Download this report</h3>
-        <div class="btn-grid">
-          <button class="btn" id="dl-csv">Excel (CSV)</button>
-          <button class="btn" id="dl-pdf">PDF report</button>
-          <button class="btn" id="dl-drive">Save to Google Drive</button>
-          <button class="btn" id="dl-json">Full backup</button>
+      <details class="card fold" id="r-insights-card">
+        <summary><span class="fold-ico">💡</span><span class="fold-text"><b>Insights</b><small id="r-insights-sum"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <ul id="r-insights" class="insights"></ul>
         </div>
+      </details>
+      <details class="card fold" id="r-plan-card">
+        <summary><span class="fold-ico">📊</span><span class="fold-text"><b id="r-plan-title">Budget plan</b><small id="r-plan-sum"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="r-plan"></div>
+        </div>
+      </details>
+      <details class="card fold" id="r-family-card" hidden>
+        <summary><span class="fold-ico">👨‍👩‍👧</span><span class="fold-text"><b>By family member</b><small id="r-family-total"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="r-family"></div>
+          <button class="link small tip-link" data-tip="familyReport">ⓘ How this works</button>
+        </div>
+      </details>
+      <details class="card fold" id="r-items-card">
+        <summary><span class="fold-ico">🧺</span><span class="fold-text"><b>By item name</b><small id="r-items-count"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <input id="r-item-search" type="search" placeholder="Search an item…" autocomplete="off">
+          <div id="r-items"></div>
+          <button class="link small" id="r-items-more" hidden>Show all</button>
+          <button class="link small tip-link" data-tip="items">ⓘ How this works</button>
+        </div>
+      </details>
+      <details class="card fold" id="r-gifts-card" hidden>
+        <summary><span class="fold-ico">🎁</span><span class="fold-text"><b>Spent on people</b><small id="r-gifts-total"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="r-gifts"></div>
+          <button class="link small tip-link" data-tip="gifts">ⓘ How this works</button>
+        </div>
+      </details>
+      <details class="card fold" id="r-daily-card">
+        <summary><span class="fold-ico">📅</span><span class="fold-text"><b id="r-daily-title">Spending each day</b><small id="r-daily-sum"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="r-daily"></div>
+        </div>
+      </details>
+      <details class="card fold" id="r-trend-card">
+        <summary><span class="fold-ico">📈</span><span class="fold-text"><b>Last 6 months</b><small id="r-trend-sum"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="r-trend"></div>
+          <button class="link small" data-table="r-trend-table">Table</button>
+          <div id="r-trend-table" class="table-wrap" hidden></div>
+        </div>
+      </details>
+      <details class="card fold" id="r-modes-card">
+        <summary><span class="fold-ico">💳</span><span class="fold-text"><b>How you paid</b><small id="r-modes-sum"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="r-modes"></div>
+        </div>
+      </details>
+
+      <h4 class="group-label">Download this report</h4>
+      <div class="dl-row">
+        <button class="btn sm" id="dl-csv"><span>📊</span>Excel</button>
+        <button class="btn sm" id="dl-pdf"><span>📄</span>PDF</button>
+        <button class="btn sm" id="dl-drive"><span>☁️</span>Drive</button>
+        <button class="btn sm" id="dl-json"><span>💾</span>Backup</button>
       </div>
     </section>
 
     <!-- ============ SETTINGS ============ -->
     <section id="view-settings" class="view" data-title="Settings" hidden>
-      <div class="card" id="drive-card">
-        <h3>☁️ Google Drive backup <button class="tip-btn" data-tip="drive"></button></h3>
-        <p id="drive-status" class="muted small"></p>
-        <button class="btn gsi block" id="drive-connect"><svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg> Sign in with Google</button>
-        <div class="btn-row">
-          <button class="btn" id="drive-sync" hidden>Sync now</button>
-          <button class="btn ghost" id="drive-disconnect" hidden>Sign out</button>
+      <h4 class="group-label">Backup</h4>
+      <details class="card fold" id="drive-card">
+        <summary><span class="fold-ico">☁️</span><span class="fold-text"><b>Google Drive backup</b><small id="sum-drive"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <p id="drive-status" class="muted small"></p>
+          <button class="btn gsi block" id="drive-connect"><svg class="g-logo" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg> Sign in with Google</button>
+          <div class="btn-row">
+            <button class="btn" id="drive-sync" hidden>Sync now</button>
+            <button class="btn ghost" id="drive-disconnect" hidden>Sign out</button>
+          </div>
+          <details class="howto" id="drive-setup">
+            <summary>Advanced: use your own Google Client ID</summary>
+            <label class="field"><span>Google Client ID</span>
+              <input id="client-id" type="text" placeholder="1234-abc.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+            </label>
+            <button class="btn" id="save-client">Save Client ID</button>
+            <ol>
+              <li>Open <b>console.cloud.google.com</b> → <b>New project</b> → name it <i>Kaasu</i>.</li>
+              <li>Search <b>Google Drive API</b> → <b>Enable</b>.</li>
+              <li><b>Google Auth Platform</b> → <b>Get started</b>: app name <i>Kaasu</i>, Audience <b>External</b>. Then <b>Audience → Publish app</b> so any Gmail can sign in.</li>
+              <li><b>Clients</b> → <b>Create client</b> → <b>Web application</b>. Authorised JavaScript origin: <code id="origin-hint"></code>; redirect URI (iPhone): <code id="redirect-hint"></code></li>
+              <li>Copy the <b>Client ID</b> and paste it above.</li>
+            </ol>
+          </details>
+          <button class="link small tip-link" data-tip="drive">ⓘ How this works</button>
         </div>
-        <details class="howto" id="drive-setup">
-          <summary>Advanced: use your own Google Client ID</summary>
-          <label class="field"><span>Google Client ID</span>
-            <input id="client-id" type="text" placeholder="1234-abc.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+      </details>
+      <details class="card fold" id="backup-card">
+        <summary><span class="fold-ico">💾</span><span class="fold-text"><b>Backup &amp; restore</b><small id="sum-backup"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div class="btn-row">
+            <button class="btn" id="backup-dl">Download backup</button>
+            <button class="btn" id="backup-restore">Restore from file</button>
+          </div>
+          <button class="btn danger block" id="erase">Erase everything on this phone</button>
+          <button class="link small tip-link" data-tip="backup">ⓘ How this works</button>
+        </div>
+      </details>
+      <h4 class="group-label">Family &amp; privacy</h4>
+      <details class="card fold" id="family-card">
+        <summary><span class="fold-ico">👨‍👩‍👧</span><span class="fold-text"><b>Family members</b><small id="sum-family"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="members" class="learned members"></div>
+          <div class="key-add"><input id="member-new" type="text" placeholder="Add a name, e.g. Papa" autocomplete="off" autocapitalize="words" maxlength="24"><button class="btn" id="member-add">Add</button></div>
+          <button class="link small tip-link" data-tip="family">ⓘ How this works</button>
+        </div>
+      </details>
+      <details class="card fold" id="privacy-card">
+        <summary><span class="fold-ico">🔒</span><span class="fold-text"><b>Private entries &amp; PIN</b><small id="sum-privacy"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <p id="lock-status" class="muted small"></p>
+          <div class="btn-row">
+            <button class="btn primary" id="pin-set">Set a PIN</button>
+            <button class="btn" id="pin-change" hidden>Change PIN</button>
+            <button class="btn ghost" id="pin-remove" hidden>Remove PIN</button>
+          </div>
+          <div id="lock-opts" hidden>
+            <label class="check lock-check"><input type="checkbox" id="lock-app"> <span>Ask for the PIN every time Kaasu opens (locks the whole app)</span></label>
+            <button class="btn block" id="lock-now">🔒 Lock now</button>
+          </div>
+          <button class="link small tip-link" data-tip="privacy">ⓘ How this works</button>
+        </div>
+      </details>
+      <h4 class="group-label">Budget</h4>
+      <details class="card fold" id="plan-settings">
+        <summary><span class="fold-ico">📊</span><span class="fold-text"><b>Needs · Wants · Savings</b><small id="sum-plan"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <label class="field"><span>Split</span><select id="split-preset"></select></label>
+          <div class="field-row" id="split-custom" hidden>
+            <label class="field"><span>Needs %</span><input id="split-need" type="number" inputmode="numeric" min="0" max="100"></label>
+            <label class="field"><span>Wants %</span><input id="split-want" type="number" inputmode="numeric" min="0" max="100"></label>
+            <label class="field"><span>Savings %</span><input id="split-save" type="number" inputmode="numeric" min="0" max="100"></label>
+          </div>
+          <p class="small" id="split-sum" hidden></p>
+          <label class="field"><span>Plan based on</span>
+            <select id="base-mode"><option value="income">This month's income (salary + other income)</option><option value="fixed">A fixed amount every month</option></select>
           </label>
-          <button class="btn" id="save-client">Save Client ID</button>
-          <ol>
-            <li>Open <b>console.cloud.google.com</b> → <b>New project</b> → name it <i>Kaasu</i>.</li>
-            <li>Search <b>Google Drive API</b> → <b>Enable</b>.</li>
-            <li><b>Google Auth Platform</b> → <b>Get started</b>: app name <i>Kaasu</i>, Audience <b>External</b>. Then <b>Audience → Publish app</b> so any Gmail can sign in.</li>
-            <li><b>Clients</b> → <b>Create client</b> → <b>Web application</b>. Authorised JavaScript origin: <code id="origin-hint"></code>; redirect URI (iPhone): <code id="redirect-hint"></code></li>
-            <li>Copy the <b>Client ID</b> and paste it above.</li>
-          </ol>
-        </details>
-      </div>
-
-      <div class="card" id="family-card">
-        <h3>👨‍👩‍👧 Family members <button class="tip-btn" data-tip="family"></button></h3>
-        <div id="members" class="learned members"></div>
-        <div class="key-add"><input id="member-new" type="text" placeholder="Add a name, e.g. Papa" autocomplete="off" autocapitalize="words" maxlength="24"><button class="btn" id="member-add">Add</button></div>
-      </div>
-
-      <div class="card" id="privacy-card">
-        <h3>🔒 Private entries &amp; PIN <button class="tip-btn" data-tip="privacy"></button></h3>
-        <p id="lock-status" class="muted small"></p>
-        <div class="btn-row">
-          <button class="btn primary" id="pin-set">Set a PIN</button>
-          <button class="btn" id="pin-change" hidden>Change PIN</button>
-          <button class="btn ghost" id="pin-remove" hidden>Remove PIN</button>
+          <label class="field" id="base-amount-wrap" hidden><span>Fixed monthly amount (₹)</span><input id="base-amount" type="number" inputmode="numeric" min="0" placeholder="e.g. 50000"></label>
+          <label class="check"><input type="checkbox" id="carry"> <span>Carry last month's balance forward (plus or minus)</span></label>
+          <details class="howto">
+            <summary>Which head each category goes to</summary>
+            <div id="cat-heads" class="learned"></div>
+          </details>
+          <label class="field"><span>Overall spending limit (₹, optional)</span><input id="budget" type="number" inputmode="numeric" min="0" placeholder="e.g. 25000"></label>
+          <button class="link small tip-link" data-tip="planSettings">ⓘ How this works</button>
         </div>
-        <div id="lock-opts" hidden>
-          <label class="check lock-check"><input type="checkbox" id="lock-app"> <span>Ask for the PIN every time Kaasu opens (locks the whole app)</span></label>
-          <button class="btn block" id="lock-now">🔒 Lock now</button>
+      </details>
+      <details class="card fold" id="rules-card">
+        <summary><span class="fold-ico">🔁</span><span class="fold-text"><b>Monthly auto entries</b><small id="sum-rules"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="rules" class="list"></div>
+          <button class="btn block" id="rule-add">+ Add monthly entry</button>
+          <button class="link small tip-link" data-tip="rules">ⓘ How this works</button>
         </div>
-      </div>
-
-      <div class="card" id="look-card">
-        <h3>🎨 Look &amp; feel <button class="tip-btn" data-tip="look"></button></h3>
-        <div class="field"><span>Colour theme</span><div class="skins" id="skins"></div></div>
-        <div class="field"><span>Light or dark</span>
-          <div class="seg three" id="mode-seg"><button type="button" data-mode="">📱 Phone</button><button type="button" data-mode="light">☀️ Light</button><button type="button" data-mode="dark">🌙 Dark</button></div>
+      </details>
+      <h4 class="group-label">App</h4>
+      <details class="card fold" id="look-card">
+        <summary><span class="fold-ico">🎨</span><span class="fold-text"><b>Look &amp; feel</b><small id="sum-look"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div class="field"><span>Colour theme</span><div class="skins" id="skins"></div></div>
+          <div class="field"><span>Light or dark</span>
+            <div class="seg three" id="mode-seg"><button type="button" data-mode="">📱 Phone</button><button type="button" data-mode="light">☀️ Light</button><button type="button" data-mode="dark">🌙 Dark</button></div>
+          </div>
+          <div class="field"><span>Font</span><div class="fonts" id="fonts"></div></div>
+          <button class="link small tip-link" data-tip="look">ⓘ How this works</button>
         </div>
-        <div class="field"><span>Font</span><div class="fonts" id="fonts"></div></div>
-      </div>
+      </details>
+      <details class="card fold" id="ai-card">
+        <summary><span class="fold-ico">🤖</span><span class="fold-text"><b>AI bill reading</b><small id="sum-ai"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <label class="check"><input type="checkbox" id="ai-on"> <span>Use AI to read bills and PDFs</span></label>
 
-      <div class="card" id="ai-card">
-        <h3>🤖 AI bill reading <small class="muted">optional</small> <button class="tip-btn" data-tip="ai"></button></h3>
-        <label class="check"><input type="checkbox" id="ai-on"> <span>Use AI to read bills and PDFs</span></label>
+          <div class="field"><span>Google Gemini keys (free) · <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">get one</a></span>
+            <ul id="ai-gemini-list" class="key-list"></ul>
+            <div class="key-add"><input id="ai-gemini-new" type="text" placeholder="Paste a Gemini key" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-gemini-add">Add</button></div>
+          </div>
 
-        <div class="field"><span>Google Gemini keys (free) · <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">get one</a></span>
-          <ul id="ai-gemini-list" class="key-list"></ul>
-          <div class="key-add"><input id="ai-gemini-new" type="text" placeholder="Paste a Gemini key" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-gemini-add">Add</button></div>
+          <label class="field key-pick" id="ai-pick-wrap" hidden><span>Which Gemini key to use</span><select id="ai-pick"></select></label>
+
+          <details class="howto">
+            <summary>Claude key (optional, paid)</summary>
+            <div class="key-add"><input id="ai-claude" type="password" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-claude-save">Save</button></div>
+            <small class="muted">Used only if Gemini can't read a file. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</small>
+          </details>
+          <p class="muted small" id="ai-status"></p>
+          <button class="link small tip-link" data-tip="ai">ⓘ How this works</button>
         </div>
-
-        <label class="field key-pick" id="ai-pick-wrap" hidden><span>Which Gemini key to use</span><select id="ai-pick"></select></label>
-
-        <details class="howto">
-          <summary>Claude key (optional, paid)</summary>
-          <div class="key-add"><input id="ai-claude" type="password" placeholder="sk-ant-…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="ai-claude-save">Save</button></div>
-          <small class="muted">Used only if Gemini can't read a file. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</small>
-        </details>
-        <p class="muted small" id="ai-status"></p>
-      </div>
-
-      <div class="card" id="rules-card">
-        <h3>🔁 Monthly auto entries <button class="tip-btn" data-tip="rules"></button></h3>
-        <div id="rules" class="list"></div>
-        <button class="btn block" id="rule-add">+ Add monthly entry</button>
-      </div>
-
-      <div class="card" id="plan-settings">
-        <h3>📊 Needs · Wants · Savings <button class="tip-btn" data-tip="planSettings"></button></h3>
-        <label class="field"><span>Split</span><select id="split-preset"></select></label>
-        <div class="field-row" id="split-custom" hidden>
-          <label class="field"><span>Needs %</span><input id="split-need" type="number" inputmode="numeric" min="0" max="100"></label>
-          <label class="field"><span>Wants %</span><input id="split-want" type="number" inputmode="numeric" min="0" max="100"></label>
-          <label class="field"><span>Savings %</span><input id="split-save" type="number" inputmode="numeric" min="0" max="100"></label>
+      </details>
+      <details class="card fold" id="install-card">
+        <summary><span class="fold-ico">📲</span><span class="fold-text"><b>Install on your phone</b><small id="sum-install"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <p class="muted small" id="install-text">Android: Chrome ⋮ → <b>Add to Home screen</b>. iPhone: Safari → Share → <b>Add to Home Screen</b>.</p>
+          <button class="btn primary" id="btn-install" hidden>Install app</button>
+          <a class="btn block" id="apk-link" href="https://github.com/rlm1711204/rlm1711204.github.io/releases/latest/download/Kaasu.apk" target="_blank" rel="noopener">⬇️ Download Android app (APK)</a>
+          <button class="link small tip-link" data-tip="install">ⓘ How this works</button>
         </div>
-        <p class="small" id="split-sum" hidden></p>
-        <label class="field"><span>Plan based on</span>
-          <select id="base-mode"><option value="income">This month's income (salary + other income)</option><option value="fixed">A fixed amount every month</option></select>
-        </label>
-        <label class="field" id="base-amount-wrap" hidden><span>Fixed monthly amount (₹)</span><input id="base-amount" type="number" inputmode="numeric" min="0" placeholder="e.g. 50000"></label>
-        <label class="check"><input type="checkbox" id="carry"> <span>Carry last month's balance forward (plus or minus)</span></label>
-        <details class="howto">
-          <summary>Which head each category goes to</summary>
-          <div id="cat-heads" class="learned"></div>
-        </details>
-        <label class="field"><span>Overall spending limit (₹, optional)</span><input id="budget" type="number" inputmode="numeric" min="0" placeholder="e.g. 25000"></label>
-      </div>
-
-      <div class="card" id="install-card">
-        <h3>📲 Install on your phone <button class="tip-btn" data-tip="install"></button></h3>
-        <p class="muted small" id="install-text">Android: Chrome ⋮ → <b>Add to Home screen</b>. iPhone: Safari → Share → <b>Add to Home Screen</b>.</p>
-        <button class="btn primary" id="btn-install" hidden>Install app</button>
-        <a class="btn block" id="apk-link" href="https://github.com/rlm1711204/rlm1711204.github.io/releases/latest/download/Kaasu.apk" target="_blank" rel="noopener">⬇️ Download Android app (APK)</a>
-      </div>
-
-      <div class="card">
-        <h3>🧠 Words you taught Kaasu <button class="tip-btn" data-tip="learned"></button></h3>
-        <div id="learned" class="learned"></div>
-      </div>
-
-      <div class="card">
-        <h3>💾 Backup &amp; restore <button class="tip-btn" data-tip="backup"></button></h3>
-        <div class="btn-row">
-          <button class="btn" id="backup-dl">Download backup</button>
-          <button class="btn" id="backup-restore">Restore from file</button>
+      </details>
+      <details class="card fold" id="learned-card">
+        <summary><span class="fold-ico">🧠</span><span class="fold-text"><b>Words you taught Kaasu</b><small id="sum-learned"></small></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="fold-body">
+          <div id="learned" class="learned"></div>
+          <button class="link small tip-link" data-tip="learned">ⓘ How this works</button>
         </div>
-        <button class="btn danger block" id="erase">Erase everything on this phone</button>
-      </div>
-
-      <div class="card">
-        <h3>❓ Help</h3>
+      </details>
+      <div class="help-row">
         <div class="btn-row"><button class="btn primary" id="tour-settings">Take the tour</button><button class="btn" id="tips-typing">Typing tips</button></div>
       </div>
       <p class="muted small center" id="version"></p>

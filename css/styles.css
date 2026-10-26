@@ -24,6 +24,8 @@
   --tabs-h: 64px;
   --hero-a: #3f3cbb;
   --hero-b: #6a43c9;
+  --card-line: rgba(0,0,0,.035);
+  --shadow-soft: 0 1px 2px rgba(20,20,40,.05), 0 6px 20px rgba(20,20,40,.06);
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Tamil", sans-serif;
 }
 @media (prefers-color-scheme: dark) {
@@ -588,3 +590,117 @@ html.locked-app main, html.locked-app .tabs, html.locked-app .topbar { visibilit
   .tip-btn { border-color: var(--line); }
   #lockscreen::backdrop { background: var(--bg); }
 }
+
+
+/* =====================================================================
+ * v1.10 — calmer, more compact layout
+ * Softer cards, grouped lists, sections that fold into one line.
+ * ===================================================================== */
+:root[data-theme="dark"] { --card-line: var(--line); --shadow-soft: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --card-line: var(--line); --shadow-soft: none; } }
+.card { border-color: var(--card-line); box-shadow: var(--shadow-soft); border-radius: 20px; }
+main { padding-top: 2px; }
+.view { padding-bottom: 8px; }
+
+/* Quick add */
+.card.quick { padding: 12px; }
+.quick-row textarea { padding: 12px 14px; font-size: 16.5px; border-radius: 14px; border-color: transparent; }
+.quick-row textarea::placeholder { color: var(--ink-3); }
+.icon-btn { border-radius: 14px; border-color: transparent; background: var(--surface-2); }
+.icon-btn.accent { background: var(--accent); color: var(--accent-ink); }
+.icon-btn.xs { width: 30px; height: 30px; border-radius: 50%; background: transparent; }
+.icon-btn.xs svg { width: 16px; height: 16px; }
+.q-member { margin-top: 10px; }
+.q-member:empty { display: none; }
+#btn-add { margin-top: 10px; }
+.preview:empty { display: none; }
+.btn.sm { min-height: 34px; padding: 6px 12px; border-radius: 10px; font-size: 13.5px; }
+
+/* Small one-line notes on Home (new-features tour, Drive) */
+.note-bar { display: flex; align-items: center; gap: 8px; background: var(--accent-soft); border-radius: 14px; padding: 8px 8px 8px 12px; margin-bottom: 12px; font-size: 13.5px; }
+.note-bar > span { flex: 1; min-width: 0; }
+.drive-offer { display: flex; align-items: center; gap: 6px; padding: 8px; border-color: var(--card-line); }
+.drive-offer .btn.gsi { flex: 1; min-height: 42px; border-color: var(--line); }
+
+/* Hero: the number first, then its label */
+.card.hero { padding: 16px 16px 14px; }
+.hero-head { font-size: 13.5px; color: rgba(255,255,255,.9); }
+.hero-value { font-size: 40px; margin: 6px 0 0; }
+.hero-label { margin: 0 0 14px; font-size: 13px; }
+.hero-carry { margin: 0; }
+.hero .hero-carry b { color: #fff; }
+.tiles { gap: 6px; }
+.tile { padding: 8px 10px; border-radius: 12px; }
+.hero .tile .dot { position: static; display: inline-block; width: 7px; height: 7px; margin-right: 5px; vertical-align: 1px; }
+.tile-value { font-size: 16.5px; }
+
+/* Folding sections */
+details.fold { padding: 0; overflow: hidden; }
+details.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; padding: 13px 14px; -webkit-tap-highlight-color: transparent; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary .chev { flex: none; width: 18px; height: 18px; color: var(--ink-3); transition: transform .2s; margin-left: auto; }
+details.fold[open] > summary .chev { transform: rotate(90deg); }
+details.fold > summary .tip-btn { margin-left: auto; }
+details.fold > summary .tip-btn + .chev { margin-left: 2px; }
+.fold-ico { flex: none; width: 36px; height: 36px; border-radius: 11px; background: var(--accent-soft); display: grid; place-items: center; font-size: 18px; }
+.fold-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fold-text b { font-weight: 600; font-size: 15px; }
+.fold-text small { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fold-text small:empty { display: none; }
+.fold-body { padding: 2px 14px 14px; animation: fade .18s ease-out; }
+.fold-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.group-label { margin: 18px 6px 8px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.group-label:first-child { margin-top: 6px; }
+#view-settings details.fold { margin-bottom: 8px; }
+.help-row { margin: 18px 0 6px; }
+
+/* Budget plan, folded: three small heads side by side */
+#plan-card > summary { flex-direction: column; align-items: stretch; gap: 10px; }
+.fold-title { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.fold-title b { font-weight: 600; }
+#plan-card .fold-title .chev { margin-left: 8px; }
+.mini-heads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mini-head { display: flex; flex-direction: column; gap: 2px; background: var(--surface-2); border-radius: 12px; padding: 8px 10px; min-width: 0; }
+.mini-head small { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-head b { font-size: 15.5px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-bar { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 2px 0; }
+.mini-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.mini-bar i.warn { background: var(--warn); }
+.mini-bar i.danger { background: var(--danger); }
+.mini-bar i.save { background: var(--c-save); }
+.mini-empty { grid-column: 1 / -1; font-size: 13px; color: var(--ink-2); }
+
+/* Shortcut tiles (money with people, monthly entries) */
+.shortcuts { display: flex; gap: 8px; margin-bottom: 12px; }
+.shortcuts:empty { display: none; }
+.shortcuts:not(:has(> :not([hidden]))) { display: none; }
+.shortcut { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left; background: var(--surface); border: 1px solid var(--card-line); box-shadow: var(--shadow-soft); border-radius: 18px; padding: 10px 12px; }
+.sc-ico { font-size: 20px; }
+.sc-text { display: flex; flex-direction: column; min-width: 0; }
+.sc-text small { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-text b { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Grouped lists: one card, thin lines between rows */
+.section-head { margin: 18px 4px 8px; }
+.section-head h2 { font-size: 16px; }
+.group { background: var(--surface); border: 1px solid var(--card-line); box-shadow: var(--shadow-soft); border-radius: 18px; overflow: hidden; margin-bottom: 4px; }
+.group > .row { border: 0; border-radius: 0; margin: 0; background: transparent; padding: 10px 14px; }
+.group > .row + .row { border-top: 1px solid var(--line); }
+.group > .row:active { background: var(--surface-2); }
+.row .ico { width: 38px; height: 38px; border-radius: 50%; background: var(--accent-soft); font-size: 18px; }
+.day-head { margin: 16px 6px 6px; }
+.group > .locked-row { border-style: none; }
+.group > .row + .locked-row { border-top: 1px dashed var(--line); }
+
+/* People, history, reports */
+.tile.big { border-color: var(--card-line); box-shadow: var(--shadow-soft); border-radius: 16px; }
+.hint { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.r-top { margin-bottom: 4px; }
+.seg.four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; background: var(--surface-2); border-radius: 12px; padding: 4px; margin: 0 0 8px; }
+.seg.four .chip { border: 0; background: none; border-radius: 9px; padding: 7px 4px; }
+.seg.four .chip.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+#view-reports details.fold { margin-bottom: 8px; }
+.dl-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 4px; }
+.dl-row .btn { padding: 6px 4px; flex-direction: column; gap: 0; min-height: 52px; font-size: 12.5px; }
+.tip-link { display: block; margin-top: 8px; font-weight: 600; }
+.insights li { margin: 6px 0; }

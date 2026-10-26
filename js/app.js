@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.9.0';
+  const APP_VERSION = '1.10.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -63,6 +63,15 @@
   const visibleList = (list) => (isLocked() ? list.filter((t) => !t.private) : list);
   const lockedRow = (n) => (n ? `<button class="row locked-row" data-unlock><span class="ico">🔒</span><span class="what"><b>${n} private ${n === 1 ? 'entry' : 'entries'} hidden</b><span>Tap to unlock with your PIN</span></span></button>` : '');
   document.addEventListener('click', (e) => { if (e.target.closest('[data-unlock]')) Lock.unlockPrivate(); });
+  /** Rows shown together in one rounded card, with thin lines between them. */
+  const group = (html) => (html ? '<div class="group">' + html + '</div>' : '');
+
+  /** Open a folded Settings section and scroll to it. */
+  function openCard(id) {
+    const el = $('#' + id);
+    if (el.tagName === 'DETAILS') el.open = true;
+    setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 250);
+  }
   /** Before a download that would show private entries: unlock first. */
   async function okToExport() {
     if (!isLocked() || !hasPrivate()) return true;
@@ -144,9 +153,8 @@
     // the chips under the box: who spent it, private
     parsed.forEach((p) => { if (!p.ok) return; if (!p.member) p.member = qMember; if (qPrivate) p.private = true; });
     const good = parsed.filter((p) => p.ok);
-    $('#btn-add').disabled = !good.length;
+    $('#btn-add').hidden = !good.length;
     $('#btn-add').textContent = good.length > 1 ? 'Add ' + good.length + ' entries' : 'Add';
-    $('#examples').hidden = !!text;
     $('#preview').innerHTML = parsed.map((p, i) => {
       if (!p.ok) return `<div class="pv err"><span class="ico">⚠️</span><span class="what"><b>${esc(p.raw)}</b><span>${esc(p.error)}</span></span></div>`;
       const d = describe(p);
@@ -229,11 +237,6 @@
     });
   }
   $('#btn-add').addEventListener('click', addParsed);
-  $('#examples').addEventListener('click', (e) => {
-    if (e.target.tagName !== 'BUTTON') return;
-    quick.value = e.target.textContent;
-    autoGrow(); renderPreview(); quick.focus();
-  });
 
   /* ---------- Voice input --------------------------------------------- */
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -271,10 +274,10 @@
   $('#scan-camera').addEventListener('click', () => $('#file-camera').click());
   $('#scan-gallery').addEventListener('click', () => $('#file-gallery').click());
   $('#scan-pdf').addEventListener('click', () => {
-    if (!AI.isOn()) { scanSheet.close(); go('settings'); setTimeout(() => $('#ai-card').scrollIntoView({ behavior: 'smooth' }), 250); toast('PDFs need a free Gemini key — add one here (2 minutes).'); return; }
+    if (!AI.isOn()) { scanSheet.close(); go('settings'); openCard('ai-card'); toast('PDFs need a free Gemini key — add one here (2 minutes).'); return; }
     $('#file-pdf').click();
   });
-  document.addEventListener('click', (e) => { if (e.target.id === 'scan-ai-link') { scanSheet.close(); setTimeout(() => $('#ai-card').scrollIntoView({ behavior: 'smooth' }), 250); } });
+  document.addEventListener('click', (e) => { if (e.target.id === 'scan-ai-link') { scanSheet.close(); openCard('ai-card'); } });
 
   let scanStop = null;
   $('#scan-stop').addEventListener('click', () => { if (scanStop) scanStop.abort(); });
@@ -692,11 +695,12 @@
     $('#hero-carry').hidden = !showCarry;
     if (showCarry) {
       const sign = plan.carry < 0 ? '−' : '+';
-      $('#hero-carry').innerHTML = 'This month <b>' + inr(Math.round(plan.monthLeft)) + '</b> ' + sign +
-        ' from ' + prevName + ' <b class="' + (plan.carry < 0 ? 'neg-ink' : '') + '">' + inr(Math.abs(Math.round(plan.carry))) + '</b>';
+      $('#hero-carry').innerHTML = '· this month ' + inr(Math.round(plan.monthLeft)) + ' ' + sign +
+        ' ' + prevName + ' <b class="' + (plan.carry < 0 ? 'neg-ink' : '') + '">' + inr(Math.abs(Math.round(plan.carry))) + '</b>';
     }
     renderPlan($('#plan-body'), plan, true);
     $('#plan-title').textContent = 'Budget plan · ' + plan.split.join('/');
+    $('#plan-mini').innerHTML = miniHeads(plan, true);
     $('#t-spent').textContent = inr(Math.round(t.expense));
     $('#t-income').textContent = inr(Math.round(t.income));
     $('#t-saved').textContent = inr(Math.round(t.saving));
@@ -718,20 +722,23 @@
     $('#people-card').hidden = !(oweMe || iOwe);
     $('#pc-owe-me').textContent = inr(oweMe);
     $('#pc-i-owe').textContent = inr(iOwe);
+    $('#pc-i-owe-wrap').hidden = !iOwe;
 
     const rules = Store.rules().filter((r) => r.active);
     $('#auto-card').hidden = !rules.length;
     if (rules.length) {
       const upcoming = rules.map((r) => ({ r, d: Store.nextRun(r) })).filter((x) => x.d).sort((a, b) => a.d.localeCompare(b.d));
-      $('#auto-title').textContent = rules.length + ' monthly auto ' + (rules.length === 1 ? 'entry' : 'entries');
-      $('#auto-sub').textContent = upcoming.length ? 'Next: ' + (upcoming[0].r.note || upcoming[0].r.category) + ' ' + inr(upcoming[0].r.amount) + ' on ' + shortDate(upcoming[0].d) : '';
+      const nx = upcoming[0];
+      $('#auto-title').textContent = nx ? 'Next monthly entry' : rules.length + ' monthly ' + (rules.length === 1 ? 'entry' : 'entries');
+      $('#auto-next').textContent = nx ? inr(nx.r.amount) : '';
+      $('#auto-sub').textContent = nx ? (nx.r.note || nx.r.category) + ' · ' + shortDate(nx.d) : '';
     }
 
     const all = Store.active();
     const recent = visibleList(all).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
     const hiddenN = isLocked() ? all.filter((t) => t.private).length : 0;
-    $('#recent').innerHTML = (recent.length ? recent.map((t) => rowHTML(t, { showDate: true })).join('')
-      : hiddenN ? '' : '<p class="empty">Nothing yet. Type <b>chai 20</b> above and tap Add — that\'s it!</p>') + lockedRow(hiddenN);
+    $('#recent').innerHTML = (recent.length || hiddenN ? group(recent.map((t) => rowHTML(t, { showDate: true })).join('') + lockedRow(hiddenN))
+      : '<p class="empty">Nothing yet. Type <b>chai 20</b> above — that\'s it!</p>');
     renderQuickChips();
     // first run of this version: offer the tour; Drive not set up: offer sign-in
     $('#tour-offer').hidden = Help.wasSeen();
@@ -743,8 +750,24 @@
   $('#drive-offer-close').addEventListener('click', () => { localStorage.setItem(DRIVE_OFFER_KEY, '1'); $('#drive-offer').hidden = true; });
   $('#drive-offer-go').addEventListener('click', () => doSync(true));
   $('#people-card').addEventListener('click', () => go('people'));
-  $('#auto-card').addEventListener('click', () => { go('settings'); setTimeout(() => $('#rules-card').scrollIntoView({ behavior: 'smooth' }), 250); });
-  $('#plan-edit').addEventListener('click', () => { go('settings'); setTimeout(() => $('#plan-settings').scrollIntoView({ behavior: 'smooth' }), 250); });
+  $('#auto-card').addEventListener('click', () => { go('settings'); openCard('rules-card'); });
+  $('#plan-edit').addEventListener('click', () => { go('settings'); openCard('plan-settings'); });
+
+  /** Folded budget plan: just what is left under each head, with a thin bar. */
+  function miniHeads(plan, isCurrent) {
+    if (!plan.income) return '<span class="mini-empty">Add your salary to see Needs · Wants · Savings</span>';
+    const icons = { need: '🧱', want: '🎈', saving: '🐷' };
+    const now = new Date(), [y, m] = plan.month.split('-').map(Number);
+    const pace = isCurrent ? now.getDate() / new Date(y, m, 0).getDate() : 1;
+    return plan.heads.map((h) => {
+      const ratio = h.budget ? h.used / h.budget : (h.used ? 2 : 0);
+      const save = h.key === 'saving';
+      const cls = save ? 'save' : ratio > 1 ? 'danger' : ratio > pace + 0.1 ? 'warn' : '';
+      const val = save ? (h.left > 0 ? inr(Math.round(h.left)) : '✓') : inr(Math.round(h.left));
+      return `<span class="mini-head"><small>${icons[h.key]} ${h.label}</small><b class="${!save && h.left < 0 ? 'neg-ink' : ''}">${val}</b>
+        <span class="mini-bar"><i class="${cls}" style="width:${Math.min(100, ratio * 100)}%"></i></span><small>${save ? (h.left > 0 ? 'to save' : 'target met') : h.left < 0 ? 'over' : 'left'}</small></span>`;
+    }).join('');
+  }
 
   /** Draw the Needs / Wants / Savings rows (+ carried money) into el. */
   function renderPlan(el, plan, isCurrent) {
@@ -831,17 +854,19 @@
     $('#h-summary').textContent = list.length ? list.length + ' entries' + (spent ? ' · spent ' + inr(Math.round(spent)) : '') + (inc ? ' · income ' + inr(Math.round(inc)) : '') + (q ? ' · all months' : '') : '';
     $('.month-nav', $('#view-history')).style.visibility = q ? 'hidden' : '';
 
-    let html = '', lastDate = '';
+    let html = '', lastDate = '', rows = '';
     const dayTotals = {};
     list.forEach((t) => { if (t.type === 'expense') dayTotals[t.date] = (dayTotals[t.date] || 0) + t.amount; });
     for (const t of list) {
       if (t.date !== lastDate) {
+        html += group(rows); rows = '';
         html += `<div class="day-head"><span>${niceDate(t.date)}</span><span>${dayTotals[t.date] ? 'spent ' + inr(Math.round(dayTotals[t.date])) : ''}</span></div>`;
         lastDate = t.date;
       }
-      html += rowHTML(t);
+      rows += rowHTML(t);
     }
-    $('#history').innerHTML = (html || (hiddenN && hist.f === 'all' && hist.mem == null ? '' : '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>')) + (q ? '' : lockedRow(hiddenN));
+    html += group(rows);
+    $('#history').innerHTML = (html || (hiddenN && hist.f === 'all' && hist.mem == null ? '' : '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>')) + (q ? '' : group(lockedRow(hiddenN)));
   }
   $('#h-members').addEventListener('click', (e) => {
     const c = e.target.closest('[data-m]'); if (!c) return;
@@ -875,8 +900,8 @@
         <span class="amt ${p.balance > 0 ? 'in' : ''}">${p.balance ? inr(Math.abs(Math.round(p.balance * 100) / 100)) : '✓'}</span>
       </button>`;
     };
-    $('#people').innerHTML = (open.length ? open.map(row).join('') : '<p class="empty">No pending money with anyone. 🎉</p>') +
-      (settled.length ? '<div class="day-head"><span>Settled</span></div>' + settled.map(row).join('') : '');
+    $('#people').innerHTML = (open.length ? group(open.map(row).join('')) : '<p class="empty">No pending money with anyone. 🎉</p>') +
+      (settled.length ? '<div class="day-head"><span>Settled</span></div>' + group(settled.map(row).join('')) : '');
   }
   let personKey = null;
   function openPerson(key) {
@@ -888,7 +913,7 @@
     $('#ps-add').hidden = false;
     $('#ps-settle').hidden = Math.abs(p.balance) < 0.5;
     $('#ps-settle').textContent = p.balance > 0 ? 'Got money back' : 'I paid back';
-    $('#ps-list').innerHTML = p.txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('');
+    $('#ps-list').innerHTML = group(p.txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join(''));
     if (!$('#person-sheet').open) $('#person-sheet').showModal();
   }
   $('#people').addEventListener('click', (e) => { const b = e.target.closest('[data-person]'); if (b) openPerson(b.dataset.person); });
@@ -945,6 +970,9 @@
     b.textContent = t.hidden ? 'Table' : 'Hide table';
   });
 
+  // charts inside a folded section are drawn again once it opens (to fit its width)
+  document.addEventListener('toggle', (e) => { if (e.target.open && e.target.closest && e.target.closest('#view-reports')) renderReports(); }, true);
+
   function pctChange(a, b) { return b ? Math.round(((a - b) / b) * 100) : null; }
 
   function renderReports() {
@@ -973,6 +1001,7 @@
       $('#r-plan-title').textContent = 'Budget plan · ' + plan.split.join('/');
       const now = new Date();
       renderPlan($('#r-plan'), plan, rep.y === now.getFullYear() && rep.m === now.getMonth());
+      $('#r-plan-sum').textContent = plan.income ? plan.heads.map((h) => h.label + ' ' + inr(Math.round(h.left))).join(' · ') : 'Add income to see the split';
     }
 
     // Categories
@@ -982,6 +1011,9 @@
     $('#r-cat-table').innerHTML = `<table><thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Share</th></tr></thead><tbody>${cats.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${inr(Math.round(c.amount))}</td><td class="num">${catTotal ? Math.round((c.amount / catTotal) * 100) : 0}%</td></tr>`).join('')}<tr><th>Total</th><th class="num">${inr(Math.round(catTotal))}</th><th></th></tr></tbody></table>`;
 
     // Daily (month) or monthly (longer periods) spending
+    const spanDays = Math.max(1, Math.round((Math.min(new Date(r.to + 'T00:00:00'), new Date()) - new Date(r.from + 'T00:00:00')) / 864e5) + 1);
+    $('#r-daily-sum').textContent = t.expense ? 'avg ' + inr(Math.round(t.expense / spanDays)) + ' a day' : 'No spending';
+    $('#r-trend-sum').textContent = 'Income, spent and saved';
     if (rep.range === 'month') {
       $('#r-daily-title').textContent = 'Spending each day';
       const days = Store.byDay(rep.y, rep.m);
@@ -1041,7 +1073,7 @@
     $('#r-family-card').hidden = !showFam;
     if (showFam) {
       const famTotal = fam.reduce((s, x) => s + x.spent, 0);
-      $('#r-family-total').textContent = inr(Math.round(famTotal)) + ' spent';
+      $('#r-family-total').textContent = fam.filter((x) => x.spent).sort((a, b) => b.spent - a.spent).slice(0, 3).map((x) => x.name + ' ' + inr(Math.round(x.spent))).join(' · ') || 'No spending';
       $('#r-family').innerHTML = fam.map((x) => `<button class="item-row" data-member="${esc(x.key)}">
         <span class="ico">${x.key ? esc(x.name.charAt(0).toUpperCase()) : '👤'}</span>
         <span class="what"><b>${esc(x.name)}</b><span>${x.count} ${x.count === 1 ? 'entry' : 'entries'}${x.saved ? ' · saved ' + inr(Math.round(x.saved)) : ''}${famTotal ? ' · ' + Math.round((x.spent / famTotal) * 100) + '%' : ''}</span>
@@ -1053,10 +1085,15 @@
     const modes = new Map();
     Store.shown().filter((x) => x.type === 'expense' && x.date >= r.from && x.date <= r.to).forEach((x) => modes.set(x.mode || 'Not set', (modes.get(x.mode || 'Not set') || 0) + x.amount));
     const modeIcons = { UPI: '📱', Cash: '💵', Card: '💳', Bank: '🏦', 'Not set': '❔' };
+    const topMode = [...modes.entries()].sort((a, b) => b[1] - a[1])[0];
+    $('#r-modes-sum').textContent = !topMode ? 'No spending' : topMode[0] === 'Not set' ? 'Add upi / cash / card to entries to see this' : 'Mostly ' + topMode[0] + ' · ' + inr(Math.round(topMode[1]));
     Charts.barList($('#r-modes'), [...modes.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: k, icon: modeIcons[k] || '', amount: v })), { color: 'var(--accent)', empty: 'No spending in this period.' });
 
     // Insights
-    $('#r-insights').innerHTML = insights(r, t, p, cats).map((s) => '<li>' + s + '</li>').join('');
+    const ins = insights(r, t, p, cats);
+    $('#r-insights').innerHTML = ins.map((s) => '<li>' + s + '</li>').join('');
+    const tmp = document.createElement('div'); tmp.innerHTML = ins[0] || '';
+    $('#r-insights-sum').textContent = tmp.textContent;
   }
 
   let itemQuery = '', itemsExpanded = false;
@@ -1065,7 +1102,7 @@
     const q = itemQuery.trim().toLowerCase();
     const list = q ? all.filter((x) => x.key.includes(q) || x.name.toLowerCase().includes(q) || x.category.toLowerCase().includes(q)) : all;
     const shown = (itemsExpanded || q) ? list : list.slice(0, 8);
-    $('#r-items-count').textContent = all.length ? all.length + ' items' : '';
+    $('#r-items-count').textContent = all.length ? all.length + ' items · most on ' + all[0].name + ' ' + inr(Math.round(all[0].amount)) : 'Nothing yet';
     $('#r-items').innerHTML = shown.length ? shown.map((x) => `<button class="item-row" data-item="${esc(x.key)}">
         <span class="ico">${Parser.iconFor('expense', x.category)}</span>
         <span class="what"><b>${esc(x.name)}</b><span>${x.count}× · ${esc(x.category)}${x.count > 1 ? ' · avg ' + inr(Math.round(x.avg)) : ''}</span></span>
@@ -1106,7 +1143,7 @@
     $('#ps-balance').innerHTML = inr(Math.round(total)) + ' <span class="muted small">· ' + txns.length + ' ' + (txns.length === 1 ? 'entry' : 'entries') + '</span>';
     $('#ps-settle').hidden = true;
     $('#ps-add').hidden = true;
-    $('#ps-list').innerHTML = txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('');
+    $('#ps-list').innerHTML = group(txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join(''));
     $('#person-sheet').showModal();
   }
 
@@ -1217,6 +1254,7 @@
     renderMembers();
     renderPrivacy();
     renderLook();
+    settingsSummaries();
     renderRules();
     renderPlanSettings();
     renderAI();
@@ -1225,6 +1263,28 @@
     $('#learned').innerHTML = learned.length ? learned.map(([k, v]) => `<button data-forget="${esc(k)}" title="Tap to forget">${esc(k)} → ${esc(v.category)} ✕</button>`).join('') : '<span class="muted small">Nothing yet.</span>';
     $('#version').textContent = 'Kaasu v' + APP_VERSION + ' · ' + Store.active().length + ' entries on this phone';
   }
+  /** The one line under each folded Settings section. */
+  function settingsSummaries() {
+    const st = Store.get().settings;
+    const set = (id, text) => { $('#' + id).textContent = text; };
+    set('sum-drive', Drive.wasConnected() ? '✅ Signed in' + (Drive.account() ? ' · ' + Drive.account() : '') : 'Not backed up yet — tap to sign in');
+    set('sum-backup', 'Save or restore a backup file');
+    const mem = Store.members();
+    set('sum-family', mem.length ? 'Self, ' + mem.join(', ') : 'Just you — add Papa, Mummy…');
+    const nPriv = Store.active().filter((t) => t.private).length;
+    set('sum-privacy', Lock.hasPin() ? 'PIN on' + (Lock.lockApp() ? ' · locks on open' : '') + ' · ' + nPriv + ' private' : 'No PIN set');
+    set('sum-plan', (st.split || [50, 30, 20]).join(' / ') + ' · ' + (st.baseMode === 'fixed' ? 'fixed ' + inr(+st.baseAmount || 0) : 'from income'));
+    const rules = Store.rules().filter((x) => x.active);
+    set('sum-rules', rules.length ? rules.length + ' active · ' + rules.slice(0, 2).map((x) => x.note || x.category).join(', ') + (rules.length > 2 ? '…' : '') : 'Rent, salary, SIP… added each month');
+    const skin = Look.SKINS.find((k) => k.id === Look.skin()), font = Look.FONTS.find((f) => f.id === Look.font());
+    set('sum-look', skin.name + ' · ' + font.name + ' · ' + ({ '': 'phone mode', light: 'light', dark: 'dark' }[Look.mode()]));
+    const keys = AI.geminiKeys().length + (AI.claudeKey() ? 1 : 0);
+    set('sum-ai', AI.isOn() ? '✅ On · ' + keys + ' key' + (keys > 1 ? 's' : '') : 'Off — reads bills on the phone');
+    set('sum-install', IS_STANDALONE ? '✅ Installed' : 'Add Kaasu to your home screen');
+    const nLearned = Object.keys(Store.get().learned || {}).length;
+    set('sum-learned', nLearned ? nLearned + ' words remembered' : 'Nothing yet');
+  }
+
   /* ---------- Budget plan settings -------------------------------------- */
   let customSplit = false; // you picked "Custom…" — keep the % boxes open
   function renderPlanSettings() {
@@ -1286,7 +1346,8 @@
         <span class="what"><b>${esc(r.note || r.category)}</b><span>${r.active ? 'Every month on the ' + ordinal(r.day) + (next ? ' · next ' + shortDate(next) : '') : '⏸ Paused'}</span></span>
         <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(r.amount)}</span>
       </button>`;
-    }).join('') : '<p class="empty">None yet.</p>';
+    }).join('') : '';
+    $('#rules').innerHTML = list.length ? group($('#rules').innerHTML) : '<p class="empty">None yet. Type <b>rent 12000 every month on 5th</b>.</p>';
   }
   $('#rules').addEventListener('click', (e) => {
     const b = e.target.closest('[data-rule]');
@@ -1445,6 +1506,7 @@
     $('#skins').innerHTML = Look.SKINS.map((k) => `<button type="button" class="skin ${Look.skin() === k.id ? 'on' : ''}" data-skin="${k.id}" aria-pressed="${Look.skin() === k.id}">
       <i style="background:linear-gradient(135deg, ${k.a}, ${k.b})"></i><span>${esc(k.name)}</span></button>`).join('');
     $$('#mode-seg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === Look.mode()));
+    if ($('#sum-look').textContent) settingsSummaries();
     $('#fonts').innerHTML = Look.FONTS.map((f) => `<button type="button" class="font-pick ${Look.font() === f.id ? 'on' : ''}" data-font="${f.id}" aria-pressed="${Look.font() === f.id}"><b class="ff-${f.id}">Aa ₹</b><span>${esc(f.name)}</span></button>`).join('');
   }
   $('#skins').addEventListener('click', (e) => { const b = e.target.closest('[data-skin]'); if (b) { Look.set({ skin: b.dataset.skin }); renderLook(); } });

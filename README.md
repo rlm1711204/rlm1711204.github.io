@@ -106,6 +106,12 @@ My Drive/
 
 ---
 
+## New in v1.10 — calmer, compact screens
+
+- Home shows only what matters: the typing box, Money left, a one-line budget plan (tap to open), and recent entries in one neat list.
+- Settings and Reports are short rows with a one-line summary — tap a row to open it.
+- The "Try:" examples are gone; tips are in **?** (tour) and "ⓘ How this works" inside each section.
+
 ## New in v1.9 — family, privacy, themes, help
 
 - **Family members** — Settings → *Family members* → add Papa, Mummy… On Home, tap who spent it under the typing box (it goes back to *Self* after each add), or type `papa: medicine 200` / `petrol 500 by mummy`. Reports → *By family member* shows each person's total; History can filter by person.
