@@ -848,3 +848,31 @@ body {
   .tabs, .topbar.scrolled { background: var(--surface); }
   .row .ico.out, .row .ico.in, .row .ico.save, .row .ico.ppl { background: var(--surface-2); }
 }
+
+
+/* =====================================================================
+ * v1.12 — Adding is easy to find: ＋ Add in the tab bar, labelled bar
+ * ===================================================================== */
+.quick-title { display: flex; align-items: baseline; gap: 8px; padding: 4px 6px 8px; }
+.quick-title b { font-size: 15px; }
+.quick-title span { font-size: 12.5px; color: var(--ink-3); }
+.tabs { grid-template-columns: 1fr 1fr 1.15fr 1fr 1fr 1fr; }
+.tabs button { font-size: 11px; }
+.tabs .tab-add { color: var(--ink); justify-content: flex-end; padding-bottom: 8px; }
+.tab-add .plus {
+  width: 54px; height: 54px; margin-top: -30px; border-radius: 20px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--hero-a), var(--hero-b)); color: #fff;
+  box-shadow: 0 12px 22px -8px var(--hero-b), 0 0 0 5px var(--surface);
+  transition: transform .15s;
+}
+.tab-add:active .plus { transform: scale(.94); }
+.tabs .tab-add svg { width: 28px; height: 28px; padding: 0; stroke-width: 2.6; background: none; box-shadow: none; }
+
+#add-sheet .card.quick { margin: 0 0 4px; box-shadow: none; border: 1.5px solid var(--line); }
+#add-sheet .quick-title { display: none; }
+.add-or { display: flex; align-items: center; gap: 10px; margin: 14px 2px 10px; font-size: 12.5px; color: var(--ink-3); }
+.add-or::before, .add-or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.add-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.add-kinds button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 4px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface-2); font-weight: 600; font-size: 13px; }
+.add-kinds button i { font-style: normal; font-size: 24px; }
+.add-kinds button:active { background: var(--accent-soft); }

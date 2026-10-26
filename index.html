@@ -77,7 +77,9 @@
         </div>
       </div>
 
+      <div id="quick-home-slot"></div>
       <div class="card quick">
+        <div class="quick-title"><b>➕ Add an entry</b><span>type, speak or scan</span></div>
         <div class="quick-row">
           <textarea id="quick" rows="1" placeholder="e.g. chai 20, auto 60" aria-label="What did you spend or get?" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></textarea>
           <button id="btn-mic" class="icon-btn" title="Speak" aria-label="Speak">
@@ -402,6 +404,7 @@
   <nav class="tabs" aria-label="Main">
     <button data-go="home" class="on"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
     <button data-go="history"><svg viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg><span>History</span></button>
+    <button id="tab-add" class="tab-add" aria-label="Add an entry"><span class="plus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><span>Add</span></button>
     <button data-go="people"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 5.8M17.5 14.2A5.5 5.5 0 0 1 20.5 19"/></svg><span>People</span></button>
     <button data-go="reports"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Reports</span></button>
     <button data-go="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Settings</span></button>
@@ -449,6 +452,24 @@
         <button type="submit" class="btn primary" id="f-save">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- ============ Add sheet (the + button) ============ -->
+  <dialog id="add-sheet" class="sheet">
+    <div class="sheet-head">
+      <h2>Add an entry</h2>
+      <button type="button" class="icon-btn sm" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div id="add-slot"></div>
+    <p class="add-or"><span>or pick one</span></p>
+    <div class="add-kinds">
+      <button type="button" data-kind="expense"><i>💸</i>Spent</button>
+      <button type="button" data-kind="income"><i>💰</i>Income</button>
+      <button type="button" data-kind="saving"><i>🐷</i>Saved</button>
+      <button type="button" data-kind="lent"><i>🤝</i>Gave money</button>
+      <button type="button" data-kind="borrowed"><i>🙏</i>Took money</button>
+      <button type="button" data-kind="scan"><i>📷</i>Scan a bill</button>
+    </div>
   </dialog>
 
   <!-- ============ Monthly auto entry sheet ============ -->

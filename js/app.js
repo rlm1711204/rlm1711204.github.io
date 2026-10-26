@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.11.0';
+  const APP_VERSION = '1.12.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -222,6 +222,25 @@
     autoGrow(); renderPreview();
   }
 
+  /* ---------- The + button: Add sheet --------------------------------- */
+  // The same typing card is moved into the sheet while it is open, then put back.
+  const addSheet = $('#add-sheet');
+  function openAdd() {
+    $('#add-slot').appendChild($('.card.quick'));
+    addSheet.showModal();
+    setTimeout(() => quick.focus(), 150);
+  }
+  addSheet.addEventListener('close', () => { $('#quick-home-slot').after($('.card.quick')); });
+  $('#tab-add').addEventListener('click', openAdd);
+  $('.add-kinds').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-kind]'); if (!b) return;
+    addSheet.close();
+    if (b.dataset.kind === 'scan') { $('#btn-scan').click(); return; }
+    openSheet({ mode: 'new', rec: { type: b.dataset.kind, amount: null, date: todayIso(), member: qMember, source: 'manual', note: '' } });
+  });
+  /** After adding from the sheet, close it (unless some lines still need fixing). */
+  const doneAdding = () => { if (addSheet.open && !quick.value.trim()) addSheet.close(); };
+
   async function addParsed() {
     const good = parsed.filter((p) => p.ok);
     if (!good.length) return;
@@ -239,7 +258,7 @@
         quick.value = bad.map((p) => p.raw).join(', ');
         autoGrow(); renderPreview();
         const m = monthly[0];
-        resetChips();
+        resetChips(); doneAdding();
         toast(monthly.length === 1 ? '🔁 ' + (m.note || m.category) + ' ' + inr(m.amount) + ' will be added every month on the ' + ordinal(+m.date.slice(8)) : '🔁 ' + monthly.length + ' monthly entries set up');
         return;
       }
@@ -247,7 +266,7 @@
     const added = Store.addMany(good.filter((p) => !p.repeat).map((p) => ({ type: p.type, amount: p.amount, category: p.category, person: p.person, note: p.note, date: p.date, mode: p.mode, bucket: p.bucket || '', member: p.member || '', private: !!p.private, raw: p.raw, source: p.source || 'text' })));
     resetChips();
     quick.value = bad.map((p) => p.raw).join(', ');
-    autoGrow(); renderPreview();
+    autoGrow(); renderPreview(); doneAdding();
     const total = added.reduce((s, t) => s + t.amount, 0);
     toast(added.length === 1 ? 'Added ' + inr(total) + ' · ' + (added[0].private ? '🔒 private' : added[0].person || added[0].category) : 'Added ' + added.length + ' entries (' + inr(total) + ')', 'Undo', () => {
       added.forEach((t) => Store.remove(t.id));
@@ -761,7 +780,7 @@
     const recent = visibleList(all).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
     const hiddenN = isLocked() ? all.filter((t) => t.private).length : 0;
     $('#recent').innerHTML = (recent.length || hiddenN ? group(recent.map((t) => rowHTML(t, { showDate: true })).join('') + lockedRow(hiddenN))
-      : '<p class="empty">Nothing yet. Type <b>chai 20</b> above — that\'s it!</p>');
+      : '<p class="empty">Nothing yet. Type <b>chai 20</b> above, or tap <b>＋ Add</b> below.</p>');
     renderQuickChips();
     // first run of this version: offer the tour; Drive not set up: offer sign-in
     $('#tour-offer').hidden = Help.wasSeen();
