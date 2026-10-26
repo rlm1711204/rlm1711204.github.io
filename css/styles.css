@@ -882,3 +882,10 @@ body {
 }
 .ac-main .ac-btn svg { width: 38px; height: 38px; stroke-width: 2.6; }
 #add-sheet .card.quick { margin: 0 0 4px; }
+
+/* Budget heads open their entries */
+[data-plan-head] { cursor: pointer; }
+.mini-head[data-plan-head]:active, .head-row[data-plan-head]:active { background: var(--accent-soft); }
+.head-row[data-plan-head] { border-radius: 12px; margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+.mh-go { font-style: normal; font-weight: 700; color: var(--accent); }
+.ps-hint { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-2); margin-top: 2px; }

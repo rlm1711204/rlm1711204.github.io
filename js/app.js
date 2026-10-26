@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.13.0';
+  const APP_VERSION = '1.14.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -805,8 +805,8 @@
       const save = h.key === 'saving';
       const cls = save ? 'save' : ratio > 1 ? 'danger' : ratio > pace + 0.1 ? 'warn' : '';
       const val = save ? (h.left > 0 ? inr(Math.round(h.left)) : '✓') : inr(Math.round(h.left));
-      return `<span class="mini-head h-${h.key}"><span class="ring sm">${ring([{ frac: Math.min(1, ratio), cls: cls || 'h-' + h.key }], 58, 7, icons[h.key])}</span>
-        <small>${h.label}</small><b class="${!save && h.left < 0 ? 'neg-ink' : ''}">${val}</b><small>${save ? (h.left > 0 ? 'to save' : 'target met') : h.left < 0 ? 'over' : 'left'}</small></span>`;
+      return `<span class="mini-head h-${h.key}" role="button" tabindex="0" data-plan-head="${h.key}" data-ym="${plan.month}" aria-label="See ${h.label} entries"><span class="ring sm">${ring([{ frac: Math.min(1, ratio), cls: cls || 'h-' + h.key }], 58, 7, icons[h.key])}</span>
+        <small>${h.label}</small><b class="${!save && h.left < 0 ? 'neg-ink' : ''}">${val}</b><small>${save ? (h.left > 0 ? 'to save' : 'target met') : h.left < 0 ? 'over' : 'left'} <i class="mh-go">›</i></small></span>`;
     }).join('');
   }
 
@@ -846,8 +846,8 @@
           sub += ' · ' + inr(Math.round(h.left / daysLeft)) + '/day';
         }
       }
-      html += `<div class="head-row">
-        <div class="head-top"><span class="head-name">${icons[h.key]} ${h.label}<small>${h.pct}%</small></span><span class="head-left ${h.key !== 'saving' && h.left < 0 ? 'over' : ''}">${right}</span></div>
+      html += `<div class="head-row" role="button" tabindex="0" data-plan-head="${h.key}" data-ym="${plan.month}">
+        <div class="head-top"><span class="head-name">${icons[h.key]} ${h.label}<small>${h.pct}%</small> <i class="mh-go">›</i></span><span class="head-left ${h.key !== 'saving' && h.left < 0 ? 'over' : ''}">${right}</span></div>
         <div class="head-sub">${sub}</div>
         <div class="meter"><span class="${cls}" style="width:${Math.min(100, ratio * 100)}%"></span></div>
       </div>`;
@@ -1177,16 +1177,41 @@
   });
 
   /** Show every entry behind one item / person row, reusing the person sheet. */
-  function openGroup(title, subtitle, txns) {
+  function openGroup(title, subtitle, txns, opts) {
+    opts = opts || {};
     personKey = null;
     $('#ps-name').textContent = title;
     const total = txns.reduce((s, t) => s + t.amount, 0);
-    $('#ps-balance').innerHTML = inr(Math.round(total)) + ' <span class="muted small">· ' + txns.length + ' ' + (txns.length === 1 ? 'entry' : 'entries') + '</span>';
+    $('#ps-balance').innerHTML = inr(Math.round(total)) + ' <span class="muted small">· ' + txns.length + ' ' + (txns.length === 1 ? 'entry' : 'entries') + '</span>' +
+      (opts.hint ? '<span class="ps-hint">' + opts.hint + '</span>' : '');
     $('#ps-settle').hidden = true;
     $('#ps-add').hidden = true;
-    $('#ps-list').innerHTML = group(txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join(''));
-    $('#person-sheet').showModal();
+    $('#ps-list').innerHTML = (txns.length || opts.hidden ? group(txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('') + lockedRow(opts.hidden || 0))
+      : '<p class="empty">' + (opts.empty || 'Nothing here yet.') + '</p>');
+    if (!$('#person-sheet').open) $('#person-sheet').showModal();
   }
+
+  /** Every Needs / Wants / Savings entry of one month (tap a budget head). */
+  const HEAD_TITLE = { need: '🧱 Needs', want: '🎈 Wants', saving: '🐷 Savings' };
+  function openHead(key, ym) {
+    const [y, m] = ym.split('-').map(Number);
+    const from = monthStart(y, m - 1), to = monthEnd(y, m - 1);
+    const all = Store.active().filter((t) => t.date >= from && t.date <= to && Store.headOf(t) === key);
+    const list = visibleList(all);
+    openGroup(HEAD_TITLE[key] + ' · ' + monthName(y, m - 1), '', list, {
+      hidden: all.length - list.length,
+      hint: key === 'saving' ? '' : 'Tap an entry to move it between Need and Want.',
+      empty: key === 'saving' ? 'Nothing saved this month yet. Type <b>sip 5000</b>.' : 'No ' + (key === 'need' ? 'Needs' : 'Wants') + ' spending this month yet.',
+    });
+  }
+  const planHeadClick = (e) => {
+    const h = e.target.closest('[data-plan-head]');
+    if (!h || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();   // inside the folded plan: don't open/close it
+    openHead(h.dataset.planHead, h.dataset.ym);
+  };
+  document.addEventListener('click', planHeadClick);
+  document.addEventListener('keydown', planHeadClick);
 
   function insights(r, t, p, cats) {
     const out = [];
