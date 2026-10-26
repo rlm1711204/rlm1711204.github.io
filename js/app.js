@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.12.0';
+  const APP_VERSION = '1.13.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -222,16 +222,15 @@
     autoGrow(); renderPreview();
   }
 
-  /* ---------- The + button: Add sheet --------------------------------- */
-  // The same typing card is moved into the sheet while it is open, then put back.
+  /* ---------- Home: Speak · Add · Scan ------------------------------- */
   const addSheet = $('#add-sheet');
-  function openAdd() {
-    $('#add-slot').appendChild($('.card.quick'));
-    addSheet.showModal();
-    setTimeout(() => quick.focus(), 150);
+  function openAdd(focus) {
+    if (!addSheet.open) addSheet.showModal();
+    if (focus !== false) setTimeout(() => quick.focus(), 150);
   }
-  addSheet.addEventListener('close', () => { $('#quick-home-slot').after($('.card.quick')); });
-  $('#tab-add').addEventListener('click', openAdd);
+  $('#ac-add').addEventListener('click', () => openAdd());
+  $('#ac-mic').addEventListener('click', () => { openAdd(false); $('#btn-mic').click(); });   // start listening straight away
+  $('#ac-scan').addEventListener('click', () => $('#btn-scan').click());
   $('.add-kinds').addEventListener('click', (e) => {
     const b = e.target.closest('[data-kind]'); if (!b) return;
     addSheet.close();
@@ -780,7 +779,7 @@
     const recent = visibleList(all).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
     const hiddenN = isLocked() ? all.filter((t) => t.private).length : 0;
     $('#recent').innerHTML = (recent.length || hiddenN ? group(recent.map((t) => rowHTML(t, { showDate: true })).join('') + lockedRow(hiddenN))
-      : '<p class="empty">Nothing yet. Type <b>chai 20</b> above, or tap <b>＋ Add</b> below.</p>');
+      : '<p class="empty">Nothing yet. Tap <b>＋ Add</b> above and type <b>chai 20</b> — that\'s it!</p>');
     renderQuickChips();
     // first run of this version: offer the tour; Drive not set up: offer sign-in
     $('#tour-offer').hidden = Help.wasSeen();

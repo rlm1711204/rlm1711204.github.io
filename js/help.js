@@ -137,10 +137,9 @@
   /* ---------- Guided tour --------------------------------------------- */
   // view: which screen to open; sel: what to point at
   const STEPS = [
-    { view: 'home', sel: '#tab-add', t: 'Add an entry', b: 'Tap <b>＋ Add</b> on any screen to add spending, income, savings or money given — type it, speak it, or pick a button.' },
-    { view: 'home', sel: '.card.quick', t: 'Or type it right here', b: 'Just a few words: <b>chai 20</b>, <b>petrol 500 upi</b>, <b>salary 55000</b>. Kaasu works out the rest. Add several at once with commas.' },
-    { view: 'home', sel: '#btn-scan', t: 'Scan a bill', b: 'Take a photo of a bill or pick a PDF. With an AI key, every item becomes its own entry.' },
-    { view: 'home', sel: '#q-member', t: 'Who spent it', b: 'Tap a family member before adding — or leave it on <b>Self</b>.' },
+    { view: 'home', sel: '#ac-add', t: 'Add an entry', b: 'Tap <b>＋</b> and type a few words: <b>chai 20</b>, <b>petrol 500 upi</b>, <b>salary 55000</b>. Or pick Spent, Income, Saved…' },
+    { view: 'home', sel: '#ac-mic', t: 'Or just say it', b: 'Tap <b>Speak</b> and say e.g. "lunch 150, auto 40".' },
+    { view: 'home', sel: '#ac-scan', t: 'Scan a bill', b: 'Take a photo of a bill or pick a PDF. With an AI key, every item becomes its own entry.' },
     { view: 'home', sel: '.card.hero', t: 'Money left', b: 'What is left this month after spending and saving, with last month\'s balance shown separately.' },
     { view: 'home', sel: '#plan-card', t: 'Needs · Wants · Savings', b: 'Your money split into three heads, so you know how much you can still spend on each.' },
     { view: 'home', sel: '#recent', t: 'Change or delete', b: 'Tap any entry to edit it, mark it 🔒 private, or delete it.' },
