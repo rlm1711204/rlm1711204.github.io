@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.16.0';
+  const APP_VERSION = '1.17.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -443,18 +443,40 @@
    * BILL SCANNING
    * ===================================================================== */
   const scanSheet = $('#scan-sheet');
+  const SCAN_TIP = 'Tip: lay the bill flat, good light, fill the screen with it.';
   $('#btn-scan').addEventListener('click', () => {
     $('#scan-choose').hidden = false; $('#scan-tip').hidden = false; $('#scan-progress').hidden = true;
+    $('#scan-tip').textContent = SCAN_TIP; $('#scan-tip').classList.remove('warn-note');
+    $('#scan-native').hidden = true;   // offered only if Kaasu's own camera can't be used
     fillKeyPick($('#scan-key'), $('#scan-key-wrap'));
     $('#scan-ai').innerHTML = AI.isOn() ? '🤖 <b>AI reading is on</b> — photos and PDFs are read by ' + (AI.geminiKeys().length ? 'Gemini' : 'Claude') + '.'
       : '📱 Photos are read on this phone. <a href="#settings" id="scan-ai-link">Add a free AI key</a> for better accuracy and PDFs.';
     scanSheet.showModal();
   });
-  $('#scan-camera').addEventListener('click', () => $('#file-camera').click());
-  $('#scan-gallery').addEventListener('click', () => $('#file-gallery').click());
+  // The phone may close Kaasu while its camera app / file picker is open (low memory).
+  // Remember that we sent you there, so we can explain it if Kaasu restarts.
+  const PENDING = 'kaasu.scanPending';
+  const markPending = () => { try { localStorage.setItem(PENDING, String(Date.now())); } catch (e) { /* ignore */ } };
+  const clearPending = () => { try { localStorage.removeItem(PENDING); } catch (e) { /* ignore */ } };
+  window.addEventListener('focus', () => setTimeout(clearPending, 4000));   // came back normally (photo or cancel)
+  function pickFile(id) { markPending(); $(id).click(); }
+  function scanNote(msg) { $('#scan-tip').textContent = msg; $('#scan-tip').hidden = false; $('#scan-tip').classList.add('warn-note'); }
+
+  $('#scan-camera').addEventListener('click', async () => {
+    if (!(window.Camera && Camera.supported())) { pickFile('#file-camera'); return; }
+    try {
+      const file = await Camera.open();          // Kaasu's own camera: never leaves the app
+      if (file) scanFile(file);
+    } catch (err) {
+      $('#scan-native').hidden = false;
+      scanNote('⚠️ ' + err.message);
+    }
+  });
+  $('#scan-native').addEventListener('click', () => pickFile('#file-camera'));
+  $('#scan-gallery').addEventListener('click', () => pickFile('#file-gallery'));
   $('#scan-pdf').addEventListener('click', () => {
     if (!AI.isOn()) { scanSheet.close(); go('settings'); openCard('ai-card'); toast('PDFs need a free Gemini key — add one here (2 minutes).'); return; }
-    $('#file-pdf').click();
+    pickFile('#file-pdf');
   });
   document.addEventListener('click', (e) => { if (e.target.id === 'scan-ai-link') { scanSheet.close(); openCard('ai-card'); } });
 
@@ -510,10 +532,15 @@
     return Store.active().some((t) => t.date === rec.date && Math.abs(t.amount - rec.amount) < 0.5 && (INFLOW.has(t.type) === (rec.type === 'income')));
   }
 
-  ['#file-camera', '#file-gallery', '#file-pdf'].forEach((id) => $(id).addEventListener('change', async (e) => {
+  ['#file-camera', '#file-gallery', '#file-pdf'].forEach((id) => $(id).addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
-    if (!file) return;
+    clearPending();
+    if (file) scanFile(file);
+  }));
+
+  /** Read one bill photo or PDF (from Kaasu's camera, the camera app or the gallery). */
+  async function scanFile(file) {
     if (!scanSheet.open) scanSheet.showModal();
     $('#scan-choose').hidden = true; $('#scan-tip').hidden = true; $('#scan-progress').hidden = false;
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
@@ -575,7 +602,7 @@
       msg.textContent = err.message || 'Could not read this bill. Try again with better light.';
       $('#scan-choose').hidden = false;
     } finally { URL.revokeObjectURL(url); }
-  }));
+  }
 
   /* ---------- Review many entries (statement PDFs) --------------------- */
   let impRows = [];
@@ -1986,6 +2013,16 @@
   window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (current === 'reports') renderReports(); }, 200); });
 
   show(location.hash.slice(1) || 'home');
+  // Kaasu was closed by the phone while its camera app was open: say so instead of showing nothing
+  (() => {
+    let t = 0; try { t = +localStorage.getItem(PENDING) || 0; } catch (e) { /* ignore */ }
+    clearPending();
+    if (!t || Date.now() - t > 15 * 60 * 1000) return;
+    setTimeout(() => {
+      $('#btn-scan').click();
+      scanNote('⚠️ Your phone closed Kaasu while the camera app was open, so the photo was lost. Tap "Take photo" again — Kaasu now uses its own camera, which avoids this.');
+    }, 700);
+  })();
   setPill();
   if (Lock.lockApp()) Lock.ask({ mandatory: true }); // "Ask for the PIN every time Kaasu opens"
   const rr = Drive.redirectResult();
