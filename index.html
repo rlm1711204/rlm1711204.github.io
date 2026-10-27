@@ -68,6 +68,7 @@
             <div class="hero-label">Money left</div>
             <div class="hero-value" id="hero-left">₹0</div>
             <div class="hero-carry" id="hero-carry" hidden></div>
+            <div class="hero-dues" id="hero-dues" hidden></div>
           </div>
         </div>
         <div class="tiles">
@@ -85,6 +86,11 @@
         <button id="ac-mic" class="ac-side" aria-label="Speak an entry"><span class="ac-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><small>Speak</small></button>
         <button id="ac-add" class="ac-main" aria-label="Add an entry"><span class="ac-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><small>Add</small></button>
         <button id="ac-scan" class="ac-side" aria-label="Scan a bill"><span class="ac-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 9h8M8 12h8M8 15h5"/></svg></span><small>Scan</small></button>
+      </div>
+
+      <div class="card dues-card" id="dues-card" hidden>
+        <div class="dues-head"><b>🔔 Dues to pay</b><button class="tip-btn" data-tip="dues"></button><span class="dues-total" id="dues-total"></span></div>
+        <div id="dues-list"></div>
       </div>
 
       <details class="card fold" id="plan-card">
@@ -501,12 +507,38 @@
           <select id="r-mode"><option value="">—</option><option>UPI</option><option>Cash</option><option>Card</option><option>Bank</option></select>
         </label>
       </div>
+      <label class="check" id="r-ask-wrap"><input type="checkbox" id="r-ask" checked> <span id="r-ask-label">Ask me before marking it paid (shows as due until paid)</span></label>
       <label class="check"><input type="checkbox" id="r-active" checked> <span>Active (untick to pause)</span></label>
+      <button type="button" class="btn block" id="r-advance" hidden>💸 Pay in advance</button>
       <label class="check" id="r-now-wrap"><input type="checkbox" id="r-now" checked> <span id="r-now-label">Also add it for this month</span></label>
       <p class="muted small" id="r-info"></p>
       <div class="sheet-actions">
         <button type="button" class="btn danger ghost" id="r-delete">Delete</button>
         <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ============ Pay a due (rent…) ============ -->
+  <dialog id="pay-sheet" class="sheet">
+    <form id="pay-form" method="dialog">
+      <div class="sheet-head">
+        <h2 id="pay-title">Pay</h2>
+        <button type="button" class="icon-btn sm" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div id="pay-info" class="pay-info"></div>
+      <div class="chips" id="pay-quick"></div>
+      <label class="field"><span id="pay-amount-label">Amount paying now (₹)</span><input id="pay-amount" type="number" inputmode="decimal" step="0.01" min="0" required></label>
+      <div class="field-row">
+        <label class="field"><span>Date paid</span><input id="pay-date" type="date" required></label>
+        <label class="field"><span>Paid by</span>
+          <select id="pay-mode"><option value="">—</option><option>UPI</option><option>Cash</option><option>Card</option><option>Bank</option></select>
+        </label>
+      </div>
+      <p class="small pay-note" id="pay-note"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn ghost" id="pay-skip">Skip a month</button>
+        <button type="submit" class="btn primary" id="pay-go">Pay</button>
       </div>
     </form>
   </dialog>

@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.15.0';
+  const APP_VERSION = '1.16.0';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -36,6 +36,11 @@
   const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
   const shortDate = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   const curYm = () => todayIso().slice(0, 7);
+  /** "Oct" (or "Oct 2025" for another year / when asked) for a "YYYY-MM". */
+  const monthShort = (ym, withYear) => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleString('en-IN', withYear || y !== new Date().getFullYear() ? { month: 'short', year: 'numeric' } : { month: 'short' });
+  };
 
   /* ---------- Toast (small message at the bottom) ---------------------- */
   let toastTimer;
@@ -137,7 +142,7 @@
   }
   function rowHTML(t, opts) {
     const d = describe(t);
-    const sub = [t.private ? '🔒' : '', t.member ? '👤 ' + esc(t.member) : '', d.sub, t.recurId ? '🔁 monthly' : '', t.mode ? esc(t.mode) : '', opts && opts.showDate ? niceDate(t.date) : ''].filter(Boolean).join(' · ');
+    const sub = [t.private ? '🔒' : '', t.member ? '👤 ' + esc(t.member) : '', d.sub, t.forMonth ? '🔁 for ' + monthShort(t.forMonth) : t.recurId ? '🔁 monthly' : '', t.mode ? esc(t.mode) : '', opts && opts.showDate ? niceDate(t.date) : ''].filter(Boolean).join(' · ');
     const inflow = INFLOW.has(t.type);
     return `<button class="row" data-id="${t.id}">
       <span class="ico ${t.masked ? 'lock' : ICO_TONE[t.type] || ''}">${t.masked ? '🔒' : Parser.iconFor(t.type, t.category)}</span>
@@ -158,6 +163,137 @@
       openSheet({ mode: 'edit', rec: t });
     }
   });
+
+  /* =====================================================================
+   * DUES — monthly payments (rent…) you mark as paid yourself.
+   * Unpaid months add up; pay all, one month or any part; pay ahead.
+   * ===================================================================== */
+  function renderDues() {
+    const ds = Store.dues();
+    $('#dues-card').hidden = !ds.length;
+    if (!ds.length) return;
+    const today = todayIso();
+    $('#dues-total').textContent = inr(Math.round(Store.duesTotal()));
+    $('#dues-list').innerHTML = ds.map((g) => {
+      const late = g.since < today;
+      const months = g.bills.map((x) => monthShort(x.bill.recurMonth) + ' ' + inr(x.left) + (x.paid ? ' (' + inr(x.paid) + ' paid)' : '')).join(' · ');
+      return `<div class="due-row ${late ? 'late' : ''}">
+        <span class="ico out">${Parser.iconFor(g.type, g.category)}</span>
+        <span class="what"><b>${esc(g.note || g.category)}${g.bills.length > 1 ? ' · ' + g.bills.length + ' months' : ''}</b><span>${months}</span>
+          <span class="due-when">${late ? '⚠️ Overdue since ' + shortDate(g.since) : 'Due today'}</span></span>
+        <span class="due-side"><b>${inr(g.left)}</b><button type="button" class="btn sm primary" data-pay="${esc(g.ruleId)}">Pay</button></span>
+      </div>`;
+    }).join('');
+  }
+
+  const paySheet = $('#pay-sheet');
+  let payState = null;   // { mode: 'due' | 'advance', ruleId, total, n }
+  const ruleById = (id) => Store.rules().find((x) => x.id === id);
+  function payCheck() {
+    const amt = parseFloat($('#pay-amount').value) || 0;
+    const note = $('#pay-note');
+    $('#pay-go').disabled = false;
+    note.className = 'small pay-note';
+    if (payState.mode === 'advance') { note.textContent = ''; return; }
+    const g = Store.dues().find((x) => x.ruleId === payState.ruleId);
+    if (!g) return;
+    if (amt > g.left + 0.5) {
+      note.textContent = 'That is more than the ' + inr(g.left) + ' due. To pay next months too, pay this first, then use "Pay in advance".';
+      note.classList.add('neg-ink'); $('#pay-go').disabled = true;
+    } else if (amt > 0 && amt < g.left - 0.5) {
+      // what stays due after this part payment (oldest month is paid first)
+      let rest = amt; const still = [];
+      for (const x of g.bills) { const a = Math.min(rest, x.left); rest -= a; if (x.left - a >= 0.5) still.push(monthShort(x.bill.recurMonth) + ' ' + inr(Math.round((x.left - a) * 100) / 100)); }
+      note.textContent = 'Part payment — still due after this: ' + still.join(' · ') + '.';
+    } else note.textContent = amt > 0 ? 'This clears everything due for ' + (g.note || g.category) + ' ✓' : '';
+    $('#pay-go').textContent = amt > 0 ? 'Pay ' + inr(amt) : 'Pay';
+  }
+  function openPay(ruleId) {
+    const g = Store.dues().find((x) => x.ruleId === ruleId);
+    if (!g) { toast('Nothing is due for this one now.'); return; }
+    const rule = ruleById(ruleId);
+    payState = { mode: 'due', ruleId, total: g.left };
+    $('#pay-title').textContent = 'Pay ' + (g.note || g.category);
+    $('#pay-info').innerHTML = `<div class="pay-list">${g.bills.map((x) => `<div class="pay-month"><span>${monthShort(x.bill.recurMonth, true)}${x.paid ? ' <small>· ' + inr(x.paid) + ' already paid</small>' : ''}</span><b>${inr(x.left)}</b></div>`).join('')}
+      ${g.bills.length > 1 ? `<div class="pay-month total"><span>Total due</span><b>${inr(g.left)}</b></div>` : ''}</div>`;
+    const quick = [['All ' + inr(g.left), g.left]];
+    if (g.bills.length > 1) quick.push([monthShort(g.bills[0].bill.recurMonth) + ' only ' + inr(g.bills[0].left), g.bills[0].left]);
+    quick.push(['Part…', '']);
+    $('#pay-quick').innerHTML = quick.map(([label, v]) => `<button type="button" class="chip sm" data-amt="${v}">${label}</button>`).join('');
+    $('#pay-quick').hidden = false;
+    $('#pay-amount-label').textContent = 'Amount paying now (₹)';
+    $('#pay-amount').readOnly = false;
+    $('#pay-amount').value = g.left;
+    $('#pay-date').value = todayIso();
+    $('#pay-mode').value = (rule && rule.mode) || '';
+    $('#pay-skip').hidden = false;
+    payCheck();
+    if (!paySheet.open) paySheet.showModal();
+  }
+  function openAdvance(ruleId) {
+    const rule = ruleById(ruleId);
+    if (!rule) return;
+    const g = Store.dues().find((x) => x.ruleId === ruleId);
+    if (g) { toast('First pay the ' + inr(g.left) + ' already due.'); openPay(ruleId); return; }
+    payState = { mode: 'advance', ruleId, n: 1 };
+    $('#pay-title').textContent = 'Pay ahead · ' + (rule.note || rule.category);
+    $('#pay-quick').innerHTML = [1, 2, 3, 6].map((n) => `<button type="button" class="chip sm ${n === 1 ? 'on' : ''}" data-months="${n}">${n} month${n > 1 ? 's' : ''}</button>`).join('');
+    $('#pay-quick').hidden = false;
+    $('#pay-amount-label').textContent = 'Amount (₹)';
+    $('#pay-amount').readOnly = true;
+    $('#pay-date').value = todayIso();
+    $('#pay-mode').value = rule.mode || '';
+    $('#pay-skip').hidden = true;
+    advanceInfo();
+    if (!paySheet.open) paySheet.showModal();
+  }
+  function advanceInfo() {
+    const rule = ruleById(payState.ruleId);
+    const yms = Store.nextUnbilled(rule, payState.n);
+    const span = yms.length > 1 ? monthShort(yms[0], true) + ' – ' + monthShort(yms[yms.length - 1], true) : monthShort(yms[0], true);
+    $('#pay-info').innerHTML = `<div class="pay-list"><div class="pay-month"><span>Paying for <b>${span}</b></span><b>${inr(rule.amount * yms.length)}</b></div></div>`;
+    $('#pay-amount').value = Math.round(rule.amount * yms.length * 100) / 100;
+    $('#pay-go').textContent = 'Pay ' + inr(rule.amount * yms.length) + ' ahead';
+    $('#pay-note').textContent = 'Those months will show as paid; nothing will be due for them.';
+    $('#pay-note').className = 'small pay-note';
+    $('#pay-go').disabled = false;
+  }
+  $('#pay-quick').addEventListener('click', (e) => {
+    const m = e.target.closest('[data-months]');
+    if (m) { payState.n = +m.dataset.months; $$('#pay-quick .chip').forEach((c) => c.classList.toggle('on', c === m)); advanceInfo(); return; }
+    const b = e.target.closest('[data-amt]'); if (!b) return;
+    if (b.dataset.amt === '') { $('#pay-amount').value = ''; $('#pay-amount').focus(); } else $('#pay-amount').value = b.dataset.amt;
+    payCheck();
+  });
+  $('#pay-amount').addEventListener('input', payCheck);
+  $('#pay-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const st = payState, date = $('#pay-date').value || todayIso(), mode = $('#pay-mode').value;
+    const rule = ruleById(st.ruleId);
+    const name = (rule && (rule.note || rule.category)) || 'Payment';
+    if (st.mode === 'advance') {
+      const res = Store.payAdvance(st.ruleId, st.n, date, mode);
+      paySheet.close();
+      toast('Paid ahead: ' + name + ' for ' + res.months.map((x) => monthShort(x)).join(', '), 'Undo', () => { res.payments.forEach((t) => Store.remove(t.id)); toast('Removed'); });
+      return;
+    }
+    const amt = parseFloat($('#pay-amount').value);
+    if (!(amt > 0)) { toast('Please enter the amount you paid.'); return; }
+    const made = Store.payDues(st.ruleId, amt, date, mode);
+    paySheet.close();
+    const left = (Store.dues().find((x) => x.ruleId === st.ruleId) || { left: 0 }).left;
+    toast('Paid ' + inr(amt) + ' · ' + name + ' for ' + made.map((t) => monthShort(t.forMonth)).join(' + ') + (left ? ' · ' + inr(left) + ' still due' : ' ✓'), 'Undo', () => { made.forEach((t) => Store.remove(t.id)); toast('Removed'); });
+  });
+  $('#pay-skip').addEventListener('click', () => {
+    const g = Store.dues().find((x) => x.ruleId === payState.ruleId);
+    if (!g) return;
+    const x = g.bills[0];
+    if (!confirm('Skip ' + monthShort(x.bill.recurMonth, true) + ' for ' + (g.note || g.category) + '? Its ' + inr(x.left) + ' will no longer show as due (nothing is recorded as paid).')) return;
+    Store.skipBill(x.bill.id);
+    paySheet.close();
+    toast('Skipped ' + monthShort(x.bill.recurMonth), 'Undo', () => Store.update(x.bill.id, { skipped: false }));
+  });
+  document.addEventListener('click', (e) => { const b = e.target.closest('[data-pay]'); if (b) openPay(b.dataset.pay); });
 
   /* =====================================================================
    * QUICK ADD — type a few words
@@ -775,6 +911,10 @@
     } else if (h.r.n > 1) {
       $('#hero-carry').innerHTML = 'about <b>' + inr(Math.round(h.left / h.r.n)) + '</b> a month';
     }
+    const dueAmt = Store.duesTotal();
+    $('#hero-dues').hidden = !dueAmt || h.r.n !== 1;
+    if (dueAmt) $('#hero-dues').innerHTML = '⏳ ' + inr(Math.round(dueAmt)) + ' due · <b>' + inr(Math.round(h.left - dueAmt)) + '</b> after paying';
+    renderDues();
     renderPlan($('#plan-body'), plan, true);
     $('#plan-title').textContent = 'Budget plan · ' + plan.split.join('/');
     $('#plan-mini').innerHTML = miniHeads(plan, true);
@@ -868,12 +1008,14 @@
     if (h.carry) rows.push([h.carry < 0 ? 'Shortfall from ' + prev : 'Left over from ' + prev, Math.abs(h.carry), h.carry < 0 ? '−' : '+']);
     const sum = rows.map(([label, v, sign]) => `<div class="pb-row${sign === '−' ? ' neg' : ''}"><span>${sign} ${label}</span><b>${inr(Math.round(v))}</b></div>`).join('') +
       `<div class="pb-row pb-total"><span>= ${r.n === 1 ? 'Money left' : 'Left over in this period'}</span><b>${inr(Math.round(h.left))}</b></div>`;
+    const dueAmt = Store.duesTotal();
+    const dueNote = dueAmt ? `<p class="muted small">⏳ <b>${inr(Math.round(dueAmt))}</b> is still due (rent etc.) and not counted yet — after paying it, <b>${inr(Math.round(h.left - dueAmt))}</b> would be left.</p>` : '';
     const now = r.n > 1 && h.before ? `<p class="muted small">Counting what was left before ${r.first.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}, you have <b>${inr(Math.round(h.left + h.before))}</b> now.</p>` : '';
     personKey = null;
     $('#ps-name').textContent = '💰 Money left · ' + r.label;
     $('#ps-balance').innerHTML = inr(Math.round(h.left)) + (h.base > 0 ? ' <span class="muted small">· ' + pct(left) + '% of ' + inr(Math.round(h.base)) + ' still left</span>' : '');
     $('#ps-settle').hidden = true; $('#ps-add').hidden = true;
-    $('#ps-list').innerHTML = `<div class="card mix-card">${bar}<div class="pb-sum">${sum}</div>${now}</div>`;
+    $('#ps-list').innerHTML = `<div class="card mix-card">${bar}<div class="pb-sum">${sum}</div>${now}${dueNote}</div>`;
     if (!$('#person-sheet').open) $('#person-sheet').showModal();
   }
   const heroClick = (e) => {
@@ -987,7 +1129,12 @@
     $('#h-summary').textContent = list.length ? list.length + ' entries' + (spent ? ' · spent ' + inr(Math.round(spent)) : '') + (inc ? ' · income ' + inr(Math.round(inc)) : '') + (q ? ' · all months' : '') : '';
     $('.month-nav', $('#view-history')).style.visibility = q ? 'hidden' : '';
 
-    let html = '', lastDate = '', rows = '';
+    // monthly payments not paid yet in this month (they are not counted as spent)
+    const mFrom = monthStart(hist.y, hist.m), mTo = monthEnd(hist.y, hist.m), today = todayIso();
+    const unpaid = (hist.f === 'all' || hist.f === 'expense' || hist.f === 'saving') && hist.mem == null
+      ? Store.bills().filter((b) => b.date <= today && Store.billLeft(b) >= 0.5 && (q ? (b.note + ' ' + b.category).toLowerCase().includes(q) : b.date >= mFrom && b.date <= mTo) && (hist.f === 'all' || b.type === hist.f)) : [];
+    let html = unpaid.length ? `<div class="day-head"><span>⏳ Not paid yet</span><span>${inr(Math.round(unpaid.reduce((sum, b) => sum + Store.billLeft(b), 0)))} due</span></div>` + group(unpaid.map(dueRowHTML).join('')) : '';
+    let lastDate = '', rows = '';
     const dayTotals = {};
     list.forEach((t) => { if (t.type === 'expense') dayTotals[t.date] = (dayTotals[t.date] || 0) + t.amount; });
     for (const t of list) {
@@ -1000,6 +1147,12 @@
     }
     html += group(rows);
     $('#history').innerHTML = (html || (hiddenN && hist.f === 'all' && hist.mem == null ? '' : '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>')) + (q ? '' : group(lockedRow(hiddenN)));
+  }
+  function dueRowHTML(b) {
+    const paid = Store.billPaid(b);
+    return `<button class="row due-row" data-pay="${esc(b.recurId)}"><span class="ico out">⏳</span>
+      <span class="what"><b>${esc(b.note || b.category)}</b><span>Unpaid · ${monthShort(b.recurMonth)} · due ${shortDate(b.date)}${paid ? ' · ' + inr(paid) + ' paid' : ''}</span></span>
+      <span class="amt">${inr(Store.billLeft(b))}<small>due</small></span></button>`;
   }
   $('#h-members').addEventListener('click', (e) => {
     const c = e.target.closest('[data-m]'); if (!c) return;
@@ -1494,6 +1647,13 @@
   });
 
   /* ---------- Monthly auto entries ------------------------------------- */
+  function ruleStatus(r) {
+    const due = Store.dues().find((g) => g.ruleId === r.id);
+    if (due) return ` · <b class="neg-ink">⏳ ${inr(due.left)} due</b>`;
+    const till = Store.paidTill(r);
+    if (till) return ' · ✅ paid till ' + monthShort(till, true);
+    return Store.asksPaid(r) ? ' · you mark it paid' : '';
+  }
   function renderRules() {
     const list = Store.rules().sort((a, b) => (b.active - a.active) || a.day - b.day);
     $('#rules').innerHTML = list.length ? list.map((r) => {
@@ -1501,7 +1661,7 @@
       const inflow = r.type === 'income';
       return `<button class="row ${r.active ? '' : 'paused'}" data-rule="${r.id}">
         <span class="ico">${Parser.iconFor(r.type, r.category)}</span>
-        <span class="what"><b>${esc(r.note || r.category)}</b><span>${r.active ? 'Every month on the ' + ordinal(r.day) + (next ? ' · next ' + shortDate(next) : '') : '⏸ Paused'}</span></span>
+        <span class="what"><b>${esc(r.note || r.category)}</b><span>${r.active ? 'Every month on the ' + ordinal(r.day) + (next ? ' · next ' + shortDate(next) : '') : '⏸ Paused'}${ruleStatus(r)}</span></span>
         <span class="amt ${inflow ? 'in' : ''}">${inflow ? '+' : '−'}${inr(r.amount)}</span>
       </button>`;
     }).join('') : '';
@@ -1534,6 +1694,9 @@
     $('#r-day').value = r.day;
     $('#r-mode').value = r.mode || '';
     $('#r-active').checked = r.active !== false;
+    $('#r-ask').checked = Store.asksPaid(r);
+    $('#r-advance').hidden = !rule || !Store.asksPaid(rule) || rule.type === 'income';
+    askLabel();
     $('#r-delete').hidden = !rule;
     const cur = thisMonthEntry(rule);
     $('#r-now-wrap').hidden = !!rule && !cur;
@@ -1548,7 +1711,7 @@
     if (!(amount > 0)) { toast('Please enter an amount.'); return; }
     const day = parseInt($('#r-day').value, 10);
     if (!(day >= 1 && day <= 31)) { toast('Day must be between 1 and 31.'); return; }
-    const vals = { type: $('#r-type').value, amount, category: $('#r-category').value, note: $('#r-note').value.trim() || $('#r-category').value, day, mode: $('#r-mode').value, active: $('#r-active').checked };
+    const vals = { type: $('#r-type').value, amount, category: $('#r-category').value, note: $('#r-note').value.trim() || $('#r-category').value, day, mode: $('#r-mode').value, active: $('#r-active').checked, askPaid: $('#r-ask').checked };
     if (ruleEditing) {
       const cur = thisMonthEntry(ruleEditing);
       Store.updateRule(ruleEditing.id, vals);
@@ -1565,8 +1728,18 @@
     Store.save();
     $('#rule-sheet').close();
   });
+  function askLabel() {
+    const inc = $('#r-type').value === 'income';
+    $('#r-ask-label').textContent = inc ? 'Ask me before marking it received (shows as due until received)' : 'Ask me before marking it paid (shows as due until paid)';
+    if (!ruleEditing) $('#r-info').textContent = $('#r-ask').checked ? 'On that day it shows under "Dues to pay" on Home until you mark it paid — part payments are fine.' : 'Kaasu adds it automatically when you open the app on or after that day.';
+  }
+  $('#r-type').addEventListener('change', () => { if (!ruleEditing) $('#r-ask').checked = $('#r-type').value !== 'income'; askLabel(); });
+  $('#r-ask').addEventListener('change', askLabel);
+  $('#r-advance').addEventListener('click', () => { const id = ruleEditing.id; $('#rule-sheet').close(); openAdvance(id); });
+
   $('#r-delete').addEventListener('click', () => {
-    if (!confirm('Stop this monthly entry? Entries already added stay in your history.')) return;
+    const owed = Store.dues().find((g) => g.ruleId === ruleEditing.id);
+    if (!confirm('Stop this monthly entry? Entries already added stay in your history.' + (owed ? ' Its ' + inr(owed.left) + ' still due stays on Home until you pay or skip it.' : ''))) return;
     Store.removeRule(ruleEditing.id);
     Store.save();
     $('#rule-sheet').close();

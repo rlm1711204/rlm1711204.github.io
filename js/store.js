@@ -56,7 +56,8 @@
 
   /* ---------- Records ---------------------------------------------------- */
 
-  function active() { return data.txns.filter((t) => !t.deleted); }
+  // Bills (unpaid monthly dues) are kept apart: they are not money spent until paid.
+  function active() { return data.txns.filter((t) => !t.deleted && !t.bill); }
 
   /* ---------- Private entries ---------------------------------------------
    * While locked, lists and breakdowns see private entries only as
@@ -231,6 +232,7 @@
       day: Math.min(31, Math.max(1, parseInt(r.day, 10) || 1)),
       startMonth: r.startMonth || ymOf(new Date()),
       active: r.active !== false,
+      askPaid: r.askPaid != null ? !!r.askPaid : r.type !== 'income',   // rent, EMI… wait until you mark them paid
       createdAt: now(), updatedAt: now(),
     };
     data.recurring = data.recurring || [];
@@ -289,6 +291,7 @@
           note: r.note, date, mode: r.mode, source: 'auto', raw: '',
           recurId: r.id, recurMonth: ym, createdAt: stamp, updatedAt: stamp,
         };
+        if (asksPaid(r)) t.bill = true;   // a due to pay, not money spent yet
         data.txns.push(t);
         created.push(t);
       }
@@ -296,6 +299,108 @@
     if (created.length) save();
     return created;
   }
+
+  /* ---------- Dues: monthly payments you mark as paid yourself ------------
+   * For a rule with "ask me before marking it paid" each month gets a BILL:
+   * it shows as due but is not money spent. Paying adds a normal entry
+   * dated the day you pay, linked to the bill (payFor). A bill is open until
+   * its payments add up to its amount (part payments allowed) or you skip
+   * it. Deleting a payment simply makes that amount due again. */
+  const asksPaid = (r) => (r.askPaid != null ? !!r.askPaid : r.type !== 'income');
+  const isoOf = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  const r2 = (n) => Math.round(n * 100) / 100;
+
+  function bills() { return data.txns.filter((t) => t.bill && !t.deleted); }
+  function billPaid(b) {
+    let sum = 0;
+    for (const t of data.txns) if (!t.deleted && t.payFor === b.id) sum += t.amount;
+    return r2(sum);
+  }
+  function billLeft(b) { return b.skipped ? 0 : Math.max(0, r2(b.amount - billPaid(b))); }
+
+  /** Unpaid / part-paid bills whose day has come, grouped per monthly entry, oldest first. */
+  function dues(today) {
+    const t = isoOf(today || new Date());
+    const groups = new Map();
+    for (const b of bills().filter((x) => x.date <= t).sort((x, y) => x.date.localeCompare(y.date))) {
+      const left = billLeft(b);
+      if (left < 0.5) continue;
+      const g = groups.get(b.recurId) || { ruleId: b.recurId, note: b.note, category: b.category, type: b.type, bills: [], left: 0, since: b.date };
+      g.bills.push({ bill: b, left, paid: billPaid(b) });
+      g.left = r2(g.left + left);
+      groups.set(b.recurId, g);
+    }
+    return [...groups.values()].sort((x, y) => x.since.localeCompare(y.since));
+  }
+  const duesTotal = (today) => r2(dues(today).reduce((sum, g) => sum + g.left, 0));
+
+  function payBill(b, amount, date, mode) {
+    const t = {
+      id: uid(), type: b.type, amount: r2(amount), category: b.category, person: '', note: b.note, date,
+      mode: mode != null ? mode : (b.mode || ''), bucket: b.bucket || '', source: 'manual', raw: '',
+      payFor: b.id, forMonth: b.recurMonth, createdAt: now(), updatedAt: now(),
+    };
+    data.txns.push(t);
+    return t;
+  }
+  /** Pay towards one monthly entry's dues, oldest month first. Returns the new entries. */
+  function payDues(ruleId, amount, date, mode) {
+    let rest = r2(Math.abs(Number(amount) || 0));
+    const g = dues(new Date(Math.max(Date.now(), Date.parse(date + 'T12:00:00')))).find((x) => x.ruleId === ruleId);
+    const out = [];
+    for (const x of (g ? g.bills : [])) {
+      if (rest < 0.01) break;
+      const a = Math.min(rest, x.left);
+      out.push(payBill(x.bill, a, date, mode));
+      rest = r2(rest - a);
+    }
+    if (out.length) save();
+    return out;
+  }
+
+  /** The next n months not yet added for a rule (for paying in advance). */
+  function nextUnbilled(rule, n) {
+    const have = data.txns.filter((t) => t.recurId === rule.id && t.recurMonth).map((t) => t.recurMonth).sort();
+    let [y, m] = (have.length ? have[have.length - 1] : '').split('-').map(Number);
+    let d = have.length ? new Date(y, m, 1) : null;                    // the month after the last one added
+    const start = new Date(+rule.startMonth.slice(0, 4), +rule.startMonth.slice(5, 7) - 1, 1);
+    if (!d || d < start) d = start;
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(ymOf(new Date(d.getFullYear(), d.getMonth() + i, 1)));
+    return out;
+  }
+  /** Pay the next `months` months of a rule now. Returns { months, payments }. */
+  function payAdvance(ruleId, months, date, mode) {
+    const rule = rules().find((x) => x.id === ruleId);
+    if (!rule) return { months: [], payments: [] };
+    const yms = nextUnbilled(rule, Math.max(1, months | 0));
+    const payments = [];
+    for (const ym of yms) {
+      const day = ruleDate(rule, ym);
+      const stamp = new Date(Date.parse(day + 'T00:00:00.000Z') - 864e5).toISOString();
+      const b = {
+        id: instanceId(rule.id, ym), type: rule.type, amount: rule.amount, category: rule.category, person: '',
+        note: rule.note, date: day, mode: rule.mode, source: 'auto', raw: '', bill: true,
+        recurId: rule.id, recurMonth: ym, createdAt: stamp, updatedAt: stamp,
+      };
+      data.txns.push(b);
+      payments.push(payBill(b, rule.amount, date, mode));
+    }
+    save();
+    return { months: yms, payments };
+  }
+  /** Latest month (after this one) already paid in advance, e.g. "2026-12", or ''. */
+  function paidTill(rule, today) {
+    const cur = ymOf(today || new Date());
+    let best = '';
+    for (const t of data.txns) {
+      if (t.deleted || t.recurId !== rule.id || !t.recurMonth || t.recurMonth <= cur) continue;
+      if (t.bill && billLeft(t) >= 0.5) continue;
+      if (t.recurMonth > best) best = t.recurMonth;
+    }
+    return best;
+  }
+  function skipBill(id) { return update(id, { skipped: true }); }
 
   function replaceAll(newData, opts) { data = Object.assign(emptyData(), newData); data.settings = Object.assign(emptyData().settings, data.settings); save(opts); }
   function get() { return data; }
@@ -559,6 +664,7 @@
   const api = {
     load, save, onChange, get, active, add, addMany, update, remove, restore, learn, forget, setSetting,
     shown, setMasked, isMasked, members, byMember, PRIVATE,
+    bills, billPaid, billLeft, dues, duesTotal, payDues, payAdvance, nextUnbilled, paidTill, skipBill, asksPaid,
     byItem, itemKey, gifts, budgetPlan, carryInto, headOf, categoryHead, HEADS, SPLIT_PRESETS, NEED_CATEGORIES,
     rules, addRule, updateRule, removeRule, linkToRule, applyRecurring, nextRun, ruleDate,
     merge, replaceAll, totals, byCategory, byDay, byMonth, people, owesMe, toCSV, emptyData, TYPE_LABEL,

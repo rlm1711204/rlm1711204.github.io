@@ -76,7 +76,16 @@
       <ul class="tips"><li>Get a key at <b>aistudio.google.com/apikey</b> (2 minutes, no card) and tap Add.</li>
         <li>Add a key from a second Gmail too — when one hits its free daily limit, Kaasu uses the next.</li>
         <li>Keys stay on this phone only. The photo or PDF is sent to Google (or Claude) only when you scan.</li></ul>` },
-    rules: { t: '🔁 Monthly auto entries', b: `<p>Rent, EMI, SIP, salary… set once and Kaasu adds them every month on that day. Type <b>rent 12000 every month on 5th</b>, or tap <b>+ Add monthly entry</b>. Tap one to change the amount or pause it.</p>` },
+    rules: { t: '🔁 Monthly auto entries', b: `<p>Rent, EMI, SIP, salary… set once and Kaasu adds them every month on that day. Type <b>rent 12000 every month on 5th</b>, or tap <b>+ Add monthly entry</b>. Tap one to change the amount or pause it.</p>
+      <ul class="tips"><li><b>Ask me before marking it paid</b> (on for payments): on its day the entry shows under <b>Dues to pay</b> on Home and is not counted as spent until you pay.</li>
+        <li>Open an entry and tap <b>Pay in advance</b> to pay next months early.</li></ul>` },
+    dues: { t: '🔔 Dues to pay', b: `
+      <p>Monthly payments like rent show here on their day until you pay them. They are <b>not counted as spent</b> until paid.</p>
+      <ul class="tips"><li>Tap <b>Pay</b>: pay everything, one month, or any part. Whatever is left stays due.</li>
+        <li>Not paid by next month? Both months show together, e.g. <b>House rent · 2 months ₹24,000</b>.</li>
+        <li>A late payment counts in the month you actually pay.</li>
+        <li>Paying early: Settings → Monthly auto entries → the entry → <b>Pay in advance</b>.</li>
+        <li>Not paying a month at all (e.g. waived)? Use <b>Skip a month</b>.</li></ul>` },
     planSettings: { t: '📊 Budget plan settings', b: `
       <ul class="tips"><li><b>Split</b>: how your money is shared between Needs, Wants and Savings.</li>
         <li><b>Plan based on</b>: this month's income, or a fixed amount.</li>
@@ -142,6 +151,7 @@
     { view: 'home', sel: '#ac-add', t: 'Add an entry', b: 'Tap <b>＋</b> and type a few words: <b>chai 20</b>, <b>petrol 500 upi</b>, <b>salary 55000</b>. Or pick Spent, Income, Saved…' },
     { view: 'home', sel: '#ac-mic', t: 'Or just say it', b: 'Tap <b>Speak</b> and say e.g. "lunch 150, auto 40".' },
     { view: 'home', sel: '#ac-scan', t: 'Scan a bill', b: 'Take a photo of a bill or pick a PDF. With an AI key, every item becomes its own entry.' },
+    { view: 'home', sel: '#dues-card', t: 'Dues to pay', b: 'Rent and other monthly payments wait here until you pay. Pay all, one month, or just a part.' },
     { view: 'home', sel: '.card.hero', t: 'Money left', b: 'What is left this month after spending and saving, with last month\'s balance shown separately.' },
     { view: 'home', sel: '#plan-card', t: 'Needs · Wants · Savings', b: 'Your money split into three heads, so you know how much you can still spend on each.' },
     { view: 'home', sel: '#recent', t: 'Change or delete', b: 'Tap any entry to edit it, mark it 🔒 private, or delete it.' },
