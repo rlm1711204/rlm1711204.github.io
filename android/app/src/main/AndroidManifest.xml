@@ -23,12 +23,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Links to the Kaasu site open in the app -->
+            <!-- Links to Kaasu itself open in the app. Only Kaasu's own pages:
+                 other apps live in folders of the same site (for example
+                 /pdf-photo-toolkit/) and must open in their own app. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="rlm1711204.github.io" />
+                <data android:path="/" />
+                <data android:path="/index.html" />
             </intent-filter>
         </activity>
     </application>
