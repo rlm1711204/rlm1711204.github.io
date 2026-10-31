@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.17.0';
+  const APP_VERSION = '1.17.1';
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
   const inr = (n) => (n < 0 ? '−' : '') + '₹' + Math.abs(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -70,10 +70,11 @@
 
   /* ---------- Private entries ------------------------------------------ */
   // While locked, private entries are left out of lists (totals still count them).
+  // Where some were left out, only a small 🔒 shows — no count, no words — and tapping it asks for the PIN.
   const isLocked = () => Store.isMasked();
   const hasPrivate = () => Store.active().some((t) => t.private);
   const visibleList = (list) => (isLocked() ? list.filter((t) => !t.private) : list);
-  const lockedRow = (n) => (n ? `<button class="row locked-row" data-unlock><span class="ico">🔒</span><span class="what"><b>${n} private ${n === 1 ? 'entry' : 'entries'} hidden</b><span>Tap to unlock with your PIN</span></span></button>` : '');
+  const lockedRow = (n) => (n ? '<div class="lock-mini-wrap"><button type="button" class="lock-mini" data-unlock aria-label="Unlock">🔒</button></div>' : '');
   document.addEventListener('click', (e) => { if (e.target.closest('[data-unlock]')) Lock.unlockPrivate(); });
   /** Rows shown together in one rounded card, with thin lines between them. */
   const group = (html) => (html ? '<div class="group">' + html + '</div>' : '');
@@ -86,8 +87,9 @@
   }
   /** Before a download that would show private entries: unlock first. */
   async function okToExport() {
-    if (!isLocked() || !hasPrivate()) return true;
-    return Lock.unlockPrivate('Enter your PIN — this file includes your private entries.');
+    // with a PIN set, a locked phone always asks — whether or not there are private entries, so asking says nothing
+    if (!isLocked() || (!hasPrivate() && !Lock.hasPin())) return true;
+    return Lock.unlockPrivate('Enter your PIN to download.');
   }
 
   /* ---------- Navigation (uses #hash so the phone's Back button works) - */
@@ -981,7 +983,7 @@
     const all = Store.active();
     const recent = visibleList(all).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 8);
     const hiddenN = isLocked() ? all.filter((t) => t.private).length : 0;
-    $('#recent').innerHTML = (recent.length || hiddenN ? group(recent.map((t) => rowHTML(t, { showDate: true })).join('') + lockedRow(hiddenN))
+    $('#recent').innerHTML = (recent.length || hiddenN ? group(recent.map((t) => rowHTML(t, { showDate: true })).join('')) + lockedRow(hiddenN)
       : '<p class="empty">Nothing yet. Tap <b>＋ Add</b> above and type <b>chai 20</b> — that\'s it!</p>');
     renderQuickChips();
     // first run of this version: offer the tour; Drive not set up: offer sign-in
@@ -1173,7 +1175,7 @@
       rows += rowHTML(t);
     }
     html += group(rows);
-    $('#history').innerHTML = (html || (hiddenN && hist.f === 'all' && hist.mem == null ? '' : '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>')) + (q ? '' : group(lockedRow(hiddenN)));
+    $('#history').innerHTML = (html || (hiddenN && hist.f === 'all' && hist.mem == null ? '' : '<p class="empty">No entries ' + (q ? 'match "' + esc(hist.q) + '"' : 'in ' + monthName(hist.y, hist.m)) + '.</p>')) + (q ? '' : lockedRow(hiddenN));
   }
   function dueRowHTML(b) {
     const paid = Store.billPaid(b);
@@ -1226,7 +1228,8 @@
     $('#ps-add').hidden = false;
     $('#ps-settle').hidden = Math.abs(p.balance) < 0.5;
     $('#ps-settle').textContent = p.balance > 0 ? 'Got money back' : 'I paid back';
-    $('#ps-list').innerHTML = group(p.txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join(''));
+    const seen = p.txns.filter((t) => !t.masked);
+    $('#ps-list').innerHTML = group(seen.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('')) + lockedRow(p.txns.length - seen.length);
     if (!$('#person-sheet').open) $('#person-sheet').showModal();
   }
   $('#people').addEventListener('click', (e) => { const b = e.target.closest('[data-person]'); if (b) openPerson(b.dataset.person); });
@@ -1284,7 +1287,9 @@
   });
 
   // charts inside a folded section are drawn again once it opens (to fit its width)
-  document.addEventListener('toggle', (e) => { if (e.target.open && e.target.closest && e.target.closest('#view-reports')) renderReports(); }, true);
+  // (only the report's own fold sections: a <details> drawn already open inside a chart, e.g. the plan breakdown,
+  // fires 'toggle' too, and redrawing for it would draw it again — an endless loop)
+  document.addEventListener('toggle', (e) => { if (e.target.open && e.target.matches && e.target.matches('#view-reports > details.fold')) renderReports(); }, true);
 
   function pctChange(a, b) { return b ? Math.round(((a - b) / b) * 100) : null; }
 
@@ -1450,7 +1455,11 @@
 
   /** Show every entry behind one item / person row, reusing the person sheet. */
   function openGroup(title, subtitle, txns, opts) {
-    opts = opts || {};
+    opts = Object.assign({}, opts);
+    // private entries (shown only as 🔒 while locked) are left out of the list and its total
+    const shownTxns = txns.filter((t) => !t.masked);
+    opts.hidden = (opts.hidden || 0) + txns.length - shownTxns.length;
+    txns = shownTxns;
     personKey = null;
     $('#ps-name').textContent = title;
     const total = txns.reduce((s, t) => s + t.amount, 0);
@@ -1458,7 +1467,7 @@
       (opts.hint ? '<span class="ps-hint">' + opts.hint + '</span>' : '');
     $('#ps-settle').hidden = true;
     $('#ps-add').hidden = true;
-    $('#ps-list').innerHTML = (txns.length || opts.hidden ? group(txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('') + lockedRow(opts.hidden || 0))
+    $('#ps-list').innerHTML = (txns.length || opts.hidden ? group(txns.slice().sort((a, b) => b.date.localeCompare(a.date)).map((t) => rowHTML(t, { showDate: true })).join('')) + lockedRow(opts.hidden || 0)
       : '<p class="empty">' + (opts.empty || 'Nothing here yet.') + '</p>');
     if (!$('#person-sheet').open) $('#person-sheet').showModal();
   }
@@ -1610,7 +1619,7 @@
     const mem = Store.members();
     set('sum-family', mem.length ? 'Self, ' + mem.join(', ') : 'Just you — add Papa, Mummy…');
     const nPriv = Store.active().filter((t) => t.private).length;
-    set('sum-privacy', Lock.hasPin() ? 'PIN on' + (Lock.lockApp() ? ' · locks on open' : '') + ' · ' + nPriv + ' private' : 'No PIN set');
+    set('sum-privacy', Lock.hasPin() ? 'PIN on' + (Lock.lockApp() ? ' · locks on open' : '') + (Lock.isUnlocked() ? ' · ' + nPriv + ' private' : '') : 'No PIN set');
     set('sum-plan', (st.split || [50, 30, 20]).join(' / ') + ' · ' + (st.baseMode === 'fixed' ? 'fixed ' + inr(+st.baseAmount || 0) : 'from income'));
     const rules = Store.rules().filter((x) => x.active);
     set('sum-rules', rules.length ? rules.length + ' active · ' + rules.slice(0, 2).map((x) => x.note || x.category).join(', ') + (rules.length > 2 ? '…' : '') : 'Rent, salary, SIP… added each month');
@@ -1825,8 +1834,9 @@
     $('#lock-opts').hidden = !pin;
     $('#lock-app').checked = Lock.lockApp();
     $('#lock-now').hidden = !Lock.isUnlocked();
-    $('#lock-status').innerHTML = !pin ? 'Set a PIN to hide private entries' + (n ? ' (' + n + ' private ' + (n === 1 ? 'entry' : 'entries') + ' are hidden on this phone until you do)' : '') + '.'
-      : (Lock.isUnlocked() ? '🔓 Unlocked' : '🔒 Locked') + ' · ' + n + ' private ' + (n === 1 ? 'entry' : 'entries') + '. Mark an entry private when you add or edit it.';
+    // while locked, nothing here says how many private entries there are
+    $('#lock-status').innerHTML = !pin ? 'Set a PIN to hide private entries.'
+      : Lock.isUnlocked() ? '🔓 Unlocked · ' + n + ' private ' + (n === 1 ? 'entry' : 'entries') + '. Mark an entry private when you add or edit it.' : '🔒 Locked';
   }
   $('#pin-set').addEventListener('click', async () => { if (await Lock.ask({ mode: 'set' })) toast('PIN set 🔒'); });
   $('#pin-change').addEventListener('click', async () => {

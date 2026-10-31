@@ -181,7 +181,7 @@
   async function unlockPrivate(reason) {
     if (unlocked) return true;
     if (!hasPin()) return ask({ mode: 'set', reason: 'Set a PIN on this phone to see and add private entries.' });
-    return ask({ mode: 'check', reason: reason || 'Unlock to see private entries.' });
+    return ask({ mode: 'check', reason: reason || '' });
   }
 
   // finish a "Forgot PIN" that went through Google's sign-in page (iPhone)

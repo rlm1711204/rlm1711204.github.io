@@ -6,7 +6,7 @@
  * folders of the same site (e.g. /pdf-photo-toolkit/). So this worker only
  * looks after Kaasu's own files, and only ever clears Kaasu's own saved
  * copies — the other apps keep theirs. */
-const CACHE = 'kaasu-v23';
+const CACHE = 'kaasu-v24';
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest',
   'js/parser.js', 'js/store.js', 'js/charts.js', 'js/ocr.js', 'js/camera.js', 'js/drive.js', 'js/ai.js', 'js/look.js', 'js/lock.js', 'js/help.js', 'js/app.js',

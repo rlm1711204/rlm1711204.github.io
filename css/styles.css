@@ -962,3 +962,8 @@ body {
 .cam-shutter:disabled { opacity: .5; }
 .warn-note { color: var(--danger); font-weight: 600; }
 #scan-native { grid-column: 1 / -1; }
+
+/* Private entries while locked: only a small, quiet lock — no count, no words */
+.lock-mini-wrap { display: flex; justify-content: flex-end; margin: 4px 6px 0; }
+.lock-mini { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; font-size: 15px; line-height: 1; opacity: .55; cursor: pointer; }
+.lock-mini:hover, .lock-mini:focus-visible { opacity: 1; background: var(--surface-2); }

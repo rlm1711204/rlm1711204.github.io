@@ -60,15 +60,15 @@
   function active() { return data.txns.filter((t) => !t.deleted && !t.bill); }
 
   /* ---------- Private entries ---------------------------------------------
-   * While locked, lists and breakdowns see private entries only as
-   * "🔒 Private" (amount still counts, so totals and budgets stay right). */
+   * While locked, breakdowns see private entries only as a 🔒 symbol — no
+   * name, note or person (the amount still counts, so totals stay right). */
   let masked = false;
   function setMasked(on) { masked = !!on; }
   const isMasked = () => masked;
-  const PRIVATE = 'Private';
+  const PRIVATE = '🔒';
   function shown() {
     if (!masked) return active();
-    return active().map((t) => (t.private ? Object.assign({}, t, { category: PRIVATE, note: 'Private entry', person: t.person ? PRIVATE : '', mode: '', masked: true }) : t));
+    return active().map((t) => (t.private ? Object.assign({}, t, { category: PRIVATE, note: PRIVATE, person: t.person ? PRIVATE : '', mode: '', member: '', masked: true }) : t));
   }
 
   /* ---------- Family members ----------------------------------------------- */

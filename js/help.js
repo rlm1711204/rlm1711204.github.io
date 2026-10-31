@@ -94,7 +94,7 @@
     family: { t: '👨‍👩‍👧 Family members', b: `<p>Keep everyone's spending in one app. Add names like <b>Papa</b> or <b>Mummy</b>; then choose who spent it when adding an entry (default <b>Self</b>), or type <b>papa: medicine 200</b>. Reports show each person's total.</p>` },
     privacy: { t: '🔒 Private entries & PIN', b: `
       <ul class="tips"><li>Mark an entry 🔒 <b>Private</b> (in the entry, or type the word <b>private</b>). It is hidden from lists until you enter your PIN.</li>
-        <li>Totals still count it, shown only as "Private".</li>
+        <li>While locked it disappears from lists and search; where something was left out you see only a small 🔒 (tap it to unlock). Totals still count it.</li>
         <li>Turn on <b>Ask for the PIN every time</b> to lock the whole app.</li>
         <li>Kaasu locks again a minute after you leave it. Tap 🔓 at the top to lock straight away.</li></ul>
       <p class="muted small">The PIN keeps entries away from people looking at your phone. It isn't encryption: the entries are still in your phone's storage and your Drive backup.</p>` },
